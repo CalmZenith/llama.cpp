@@ -352,8 +352,10 @@ json format_response_rerank(
 
 // shared between server_slot and server_task_result_*
 struct server_slot_stats {
+    // 白嫖的字数：本次任务直接复用历史 KV Cache 跳过的计算量
     uint64_t n_prompt_cached    = 0;
     uint64_t n_prompt_processed = 0;
+    // 已经解码生成了多少个词（旧版字段名 n_decoded）
     uint64_t n_gen              = 0;
 
     // speculative decoding stats

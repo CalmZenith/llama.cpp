@@ -1705,6 +1705,8 @@ extern "C" {
 
     LLAMA_API void llama_opt_init(struct llama_context * lctx, struct llama_model * model, struct llama_opt_params lopt_params);
 
+    // 在一个训练轮次中，处理单次迭代（Iteration）。旧版实现在 llama_context::opt_epoch_iter，新版上移为公开 API。
+    // 类比：一个学期有很多节课，这个函数负责处理具体的一小批 Token 和正确的标签（Labels），算一算模型答错了多少，然后更新权重。
     LLAMA_API void llama_opt_epoch(
             struct llama_context    * lctx,
             ggml_opt_dataset_t        dataset,

@@ -110,6 +110,9 @@ struct llama_context {
     const llama_token * get_sampled_candidates_ith(int32_t idx);  // 获取采样后第 i 个位置的候选 Token。
     size_t get_sampled_candidates_count(int32_t idx);  // 获取采样后第 i 个位置的候选 Token 数量。
 
+    // 把一个外部的“线程池”挂载到当前会话上。
+    // 通俗解释：如果同时开了好几个 AI 窗口（Context），可以让它们共用一套 CPU 核心，
+    // 防止 CPU 因频繁切换任务而卡顿。
     void attach_threadpool(
             ggml_threadpool_t threadpool,
             ggml_threadpool_t threadpool_batch);
@@ -138,6 +141,7 @@ struct llama_context {
 
     bool adapters_lora_are_same(llama_adapter_lora ** adapters, size_t n_adapters, float * scales);
 
+    // 应用适配器向量（旧版函数名为 apply_adapter_cvec，参数不变）
     bool set_adapter_cvec(
             const float * data,
                  size_t   len,
@@ -181,17 +185,20 @@ struct llama_context {
     // 设置指定序列的状态数据
     size_t state_seq_set_data(llama_seq_id seq_id, const uint8_t * src, size_t size, llama_state_seq_flags flags);
 
+    // 从文件中加载状态
     bool state_load_file(
             const char * filepath,
            llama_token * tokens_out,
                 size_t   n_token_capacity,
                 size_t * n_token_count_out);
 
+    // 把当前上下文的状态保存到文件中
     bool state_save_file(
             const char * filepath,
      const llama_token * tokens,
                 size_t   n_token_count);
 
+    // 从文件中加载指定序列的状态
     size_t state_seq_load_file(
           llama_seq_id   seq_id,
             const char * filepath,
@@ -199,6 +206,7 @@ struct llama_context {
                 size_t   n_token_capacity,
                 size_t * n_token_count_out);
 
+    // 把指定序列的状态保存到文件中
     size_t state_seq_save_file(
           llama_seq_id   seq_id,
             const char * filepath,

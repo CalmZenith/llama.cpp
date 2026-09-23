@@ -3475,6 +3475,7 @@ private:
 
                     SLT_TRC(slot, "cached n_tokens = %d, memory_seq_rm [%d, end)\n", slot.prompt.n_tokens(), p0);
 
+                    // 之前已经修改了 tokens 数组，现在要移除对应的 KV Cache（p0 之后全部作废重算）
                     slot.mem.seq_rm(slot.id, p0, -1);
 
                     // If using an alora, there may be uncached tokens that come
@@ -4144,6 +4145,8 @@ private:
         // 实际重新计算的字数，本次任务无可奈何只能让显卡重新算的 Token 量
         uint64_t n_prompt_tokens = 0;
 
+        // 遍历当前窗口 [off, off + n_tokens) 内装载的货物，判断每个 slot 在不在这趟 batch 的采样逻辑里
+        // （窗口之外的结果不属于本轮循环处理范围）
         for (int i = off; i < off + n_tokens; ++i) {
             const auto & t = batch.tokens[i];
 
@@ -4397,6 +4400,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             sse_ping_interval = task.params.sse_ping_interval;
 
             // OAI-compat
+            // 从 JSON 请求体中提取的各字段在此统一装配进任务参数（旧版由 params_from_json_cmpl 一步完成，新版拆解内联到此处）
             task.params.res_type          = res_type;
             task.params.oaicompat_cmpl_id = completion_id;
             task.params.oaicompat_model   = meta->model_name;

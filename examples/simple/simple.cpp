@@ -16,6 +16,9 @@ int main(int argc, char ** argv) {
     std::setlocale(LC_NUMERIC, "C");
 
     // path to the model gguf file
+    // 模型文件路径：指向要运行的 .gguf 文件在硬盘上的位置。
+    // 旧版示例把路径硬编码在这里，新版已改为必须由用户通过 -m 参数从命令行传入，
+    // 不告诉程序模型在哪，它什么也启动不了。
     std::string model_path;
     // prompt to generate text from
     // 初始提示词

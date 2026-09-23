@@ -487,6 +487,9 @@ struct llama_layer {
     struct ggml_tensor * ssm_alpha_in_s     = nullptr;
     struct ggml_tensor * ssm_beta_in_s      = nullptr;
 
+    // Gemma 3 的逐层特征机制。旧版此处有 tok_embd_per_layer（逐层词嵌入）：传统模型所有层共用一个词向量查找表，
+    // 而 Gemma 3 认为每一层对词的理解应该不同，因此引入逐层嵌入，在不同处理阶段按当前层的需要提取不同特征。
+    // 新版把这块展开成下面这一组 altup（上/下投影、修正、路由）与 laurel（双通道低秩投影）张量。
     // altup & laurel
     struct ggml_tensor * per_layer_inp_gate   = nullptr;
     struct ggml_tensor * per_layer_proj       = nullptr;

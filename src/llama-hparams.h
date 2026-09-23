@@ -67,7 +67,7 @@ struct llama_hparams {
     uint32_t n_ctx_train;  // context size the model was trained on 训练上下文
     uint32_t n_embd;  // 嵌入向量维度
     uint32_t n_layer_all;
-    uint32_t n_layer_nextn = 0;
+    uint32_t n_layer_nextn = 0;  // 预测后几个词（MTP / nextN，旧版字段名 nextn_predict_layers）
 
     // granite-switch: index of the single-head "router" KV layer that encodes
     // per-token adapter selection. -1 when the model has no such layer.
@@ -89,6 +89,8 @@ struct llama_hparams {
     uint32_t n_embd_head_v_swa;
 
     // different RoPE dimensions for full_attention and SWA layers
+    // 旋转维度：RoPE 只作用于向量的一部分。比如向量是 128 维，可能只有前 64 维在“旋转”以标记位置。
+    // 新版按注意力类型拆成两份：n_rot_full（全注意力层）与 n_rot_swa（滑动窗口层）。
     uint32_t n_rot_full;
     uint32_t n_rot_swa;
 
@@ -314,7 +316,7 @@ struct llama_hparams {
     std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_n;  // 负向 Alpha，控制输入值为负数时的曲线斜率
     std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_p;  // 正向 Alpha，控制输入值为正数时的曲线斜率
     std::array<float, LLAMA_MAX_LAYERS> xielu_beta;  // 贝塔系数，总体的缩放偏移量，用来调整激活函数的零点位置
-    std::array<float, LLAMA_MAX_LAYERS> xielu_eps;
+    std::array<float, LLAMA_MAX_LAYERS> xielu_eps;  // 数值稳定性常数，防指数计算精度丢失（旧版为标量，现按层拆分）
 
     // DSA (deepseek sparse attention)
     uint32_t indexer_n_head    = 0;

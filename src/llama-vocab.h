@@ -108,12 +108,12 @@ struct llama_vocab {
     std::string type_name() const;
 
     // 用来判断具体的某一个 id（Token）在字典里到底是干什么的。
-    bool is_normal      (llama_token id) const;
+    bool is_normal      (llama_token id) const;  // 普通词
     bool is_unknown     (llama_token id) const;  // 未知词
-    bool is_control     (llama_token id) const;
-    bool is_byte        (llama_token id) const;
+    bool is_control     (llama_token id) const;  // 控制符
+    bool is_byte        (llama_token id) const;  // 字节符
     bool is_user_defined(llama_token id) const;  // 用户自定义
-    bool is_unused      (llama_token id) const;
+    bool is_unused      (llama_token id) const;  // 未使用的预留位
     bool is_eog         (llama_token id) const;  // 生成结束符 End Of Generation
 
     uint8_t     token_to_byte(llama_token id) const;

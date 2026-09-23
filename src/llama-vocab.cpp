@@ -125,6 +125,7 @@ struct llm_tokenizer_spm_session {
         size_t offs = 0;
         while (offs < text.size()) {
             llm_symbol sym;
+            // 计算当前字符占用了多少个字节（如首字节是 0 开头就是 1 字节，110 开头就是 2 字节）
             size_t len = unicode_len_utf8(text[offs]);
             sym.text = text.c_str() + offs;  // 指向当前字符在原始字符串中的位置
             sym.n = std::min(len, text.size() - offs);  // 实际长度，防止越界
@@ -1936,6 +1937,7 @@ struct llama_vocab::impl {
                          bool   special) const;
 
 
+    // raw_text 是“未经加工的原始文本”：没有经过正则切割、没有经过 Unicode 标准化、没有经过空格处理
     std::vector<llama_token> tokenize(
             const std::string & raw_text,
                          bool   add_special,
@@ -3769,11 +3771,13 @@ int32_t llama_vocab::impl::token_to_piece(llama_token token, char * buf, int32_t
                 if (attr & (attr_special | LLAMA_TOKEN_ATTR_USER_DEFINED)) {
                     return _try_copy(token_text.data(), token_text.size());
                 }
+                // 当前 Token 的属性中包含 [普通属性]
                 if (attr & LLAMA_TOKEN_ATTR_NORMAL) {
                     std::string result = token_text;
                     llama_unescape_whitespace(result);
                     return _try_copy(result.data(), result.size());
                 }
+                // 当前 Token 的属性中包含 [原始字节属性]
                 if (attr & LLAMA_TOKEN_ATTR_BYTE) {
                     char byte = (char) token_to_byte(token);
                     return _try_copy((char*) &byte, 1);

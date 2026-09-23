@@ -260,7 +260,7 @@ struct common_chat_templates_inputs {
     common_chat_tool_choice               tool_choice         = COMMON_CHAT_TOOL_CHOICE_AUTO;
     bool                                  parallel_tool_calls = false;
     common_reasoning_format               reasoning_format    = COMMON_REASONING_FORMAT_NONE; // TODO: refactor this to "bool enable_thinking"
-    bool                                  enable_thinking     = true;
+    bool                                  enable_thinking     = true;  // 是否开启思考模式（旧版字段为 thinking_forced_open，新版统一为此开关）
     std::chrono::system_clock::time_point now                 = std::chrono::system_clock::now();
     std::map<std::string, std::string>    chat_template_kwargs;
     bool                                  add_bos = false;

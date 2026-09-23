@@ -1590,6 +1590,7 @@ std::string server_task_result_metrics::to_metrics() {
         },
     };
 
+    // 把 json 指标数据转换成 prometheus 文本格式（旧版此逻辑在 server-context.cpp，新版集中到 server-task.cpp 的 to_metrics()）
     std::stringstream prometheus;
 
     auto add_items = [&prometheus](const char * type, const std::vector<metric_item> & items) {

@@ -285,6 +285,7 @@ struct llama_model_loader {
 
     void done_getting_tensors(bool partial = false) const;
 
+    // mlock_mmaps：把映射锁死在 RAM 上，绝不允许被交换到硬盘分页里（旧版 llama_model_params.use_mlock 的继任机制）。
     void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr);
 
     void get_mapping_range(size_t * first, size_t * last, void ** addr, int idx, ggml_context * ctx) const;
