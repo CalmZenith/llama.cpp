@@ -127,6 +127,7 @@ bool server_http_context::init(const common_params & params) {
     pimpl->hosts = params.hostnames;
     size_t n_tcp_hosts = 0;
     for (const auto & host : pimpl->hosts) {
+        // 判断使用普通网络 IP 还是 Unix Domain Socket（.sock 文件）并绑定端口
         if (!string_ends_with(host, ".sock")) {
             n_tcp_hosts++;
         }
@@ -146,6 +147,7 @@ bool server_http_context::init(const common_params & params) {
         }
     }
 
+    // 线程池配置
     pimpl->n_threads_http = params.n_threads_http;
     if (pimpl->n_threads_http < 1) {
         // +4 threads for monitoring, health and MCP.
@@ -156,6 +158,7 @@ bool server_http_context::init(const common_params & params) {
 }
 
 bool server_http_context::init_listener(const common_params & params) {
+    // 用 http 还是 https，取决于参数中是否传入了证书和密钥
     auto & srv = pimpl->servers.back();
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -177,6 +180,7 @@ bool server_http_context::init_listener(const common_params & params) {
     srv.reset(new httplib::Server());
 #endif
 
+    // 通用规则设定，设定默认头以及异常处理
     srv->set_default_headers({{"Server", "llama.cpp"}});
     // srv->set_logger(log_server_request); // TODO @ngxson : this is too spamy, no very useful; improve it in the future
     srv->set_exception_handler([](const httplib::Request &, httplib::Response & res, const std::exception_ptr & ep) {
@@ -257,6 +261,7 @@ bool server_http_context::init_listener(const common_params & params) {
         return endpoints;
     }();
 
+    // 处理 api-key 的
     auto middleware_validate_api_key = [api_keys = params.api_keys](const httplib::Request & req, httplib::Response & res) {
         // If API key is not set, skip validation
         if (api_keys.empty()) {
@@ -304,6 +309,7 @@ bool server_http_context::init_listener(const common_params & params) {
         return false;
     };
 
+    // 判断模型是否加载好的
     auto middleware_server_state = [this](const httplib::Request & req, httplib::Response & res) {
         if (!is_ready.load()) {
             if (frontend_paths.count(req.path)) {
@@ -371,6 +377,7 @@ bool server_http_context::init_listener(const common_params & params) {
     //
 
     // Use new `params.ui` field (backed by old `params.webui` for compat)
+    // 网页 UI 的
     if (!params.ui) {
         SRV_INF("%s", "The UI is disabled\n");
         SRV_INF("%s", "Use --ui/--no-ui (or deprecated --webui/--no-webui) to enable/disable\n");
@@ -505,7 +512,7 @@ bool server_http_context::start() {
             listening_addresses.clear();
             return false;
         }
-        listening_addresses.push_back(is_sock ? string_format("unix://%s", host.c_str())
+        listening_addresses.push_back(is_sock ? string_format("unix://%s", host.c_str())  // 记录实际的监听地址
                                               : string_format("%s://%s:%d", is_ssl ? "https" : "http", common_http_format_host(host).c_str(), port));
     }
 

@@ -161,6 +161,7 @@ extern "C" {
     // all the device properties
     struct ggml_backend_dev_props {
         // device name
+        // device name 设备名称，如："NVIDIA GeForce RTX 4090" 或 "Apple M2 Max (GPU)"
         const char * name;
         // device description
         // device description 设备描述，通常包含更具体的信息，比如驱动版本号、后端架构（CUDA/Metal）等详细字符串

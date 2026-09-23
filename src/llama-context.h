@@ -40,6 +40,7 @@ struct llama_memory_buffer {
 
 using llama_memory_buffers = std::map<ggml_backend_buffer_type_t, llama_memory_buffer>;
 
+// 核心数据结构
 struct llama_context {
     // init scheduler and compute buffers, reserve worst-case graphs
     llama_context(
@@ -56,12 +57,15 @@ struct llama_context {
     //   - etc.
     void sched_reserve();
 
+    // 作用：强制等待所有正在显卡上运行的计算任务全部完成，再继续往下走。强制同步
     void synchronize();
 
+    // 返回指向“大脑（Model）”的引用
     const llama_model   & get_model()   const;
     // 返回指向“参数（Params）”的引用
     const llama_cparams & get_cparams() const;
 
+    // 获取调度器
     ggml_backend_sched_t get_sched() const;
 
     uint32_t n_ctx()     const;  // 返回当前上下文的总容量（能记住多少个 Token）。
@@ -73,11 +77,13 @@ struct llama_context {
     uint32_t n_threads()       const;  // 返回生成单个 Token 时使用的 CPU 线程数。
     uint32_t n_threads_batch() const;  // 返回批量处理 Prompt 时使用的 CPU 线程数。
 
+    // 返回一个包含内存细分数据的结构体,可以知道：为了运行这个会话，模型占了多少内存、上下文占了多少内存、临时计算又占了多少内存。
     llama_memory_t get_memory() const;
 
     // return true if the memory was updated
     bool memory_update(bool optimize);
 
+    // 查询当前使用的是哪种池化算法
     enum llama_pooling_type pooling_type() const;
 
     float * get_logits();  // 获取每个词可能出现的“原始分数”
@@ -108,12 +114,16 @@ struct llama_context {
             ggml_threadpool_t threadpool,
             ggml_threadpool_t threadpool_batch);
 
+    // 卸载线程池
     void detach_threadpool();
 
+    // 实时修改生成和批处理时使用的线程数，不需要重启模型
     void set_n_threads(int32_t n_threads, int32_t n_threads_batch);
 
+    // 设置中断回调函数，用于在生成过程中中断
     void set_abort_callback(bool (*abort_callback)(void * data), void * abort_callback_data);
 
+    // 开启/关闭 Embedding 向量输出
     void set_embeddings (bool value);
     void set_embeddings_nextn(bool value, bool masked);
     void set_embeddings_layer_inp(uint32_t lid, bool enable);
@@ -123,6 +133,7 @@ struct llama_context {
     // 开启/关闭预热
     void set_warmup(bool value);
 
+    // 加载 LoRA 适配器
     void set_adapters_lora(llama_adapter_lora ** adapters, size_t n_adapters, float * scales);
 
     bool adapters_lora_are_same(llama_adapter_lora ** adapters, size_t n_adapters, float * scales);
@@ -144,6 +155,7 @@ struct llama_context {
             llama_memory_context_i * mctx,
                        ggml_status & ret);
 
+    // 编码：把文字转成 Token ID
     int encode(const llama_batch & batch_inp);
     // 解码：把 Token ID 转成文字，它接收一个 llama_batch（你要给模型看的所有新词），然后启动整个推理流程。
     // 做了什么：它会自动把大的 Batch 拆成刚才说的 ubatch。它会协调显卡把这些词过一遍神经网络。
@@ -154,11 +166,14 @@ struct llama_context {
     // state save/load
     //
 
+    // 获取当前上下文的状态大小
     size_t state_get_size();
+    // 获取当前上下文的状态数据
     size_t state_get_data(      uint8_t * dst, size_t size);
     // 设置当前上下文的状态数据
     size_t state_set_data(const uint8_t * src, size_t size);
 
+    // 获取指定序列的状态大小
     size_t state_seq_get_size(llama_seq_id seq_id, llama_state_seq_flags flags);
 
     // 获取指定序列的状态数据
@@ -194,16 +209,20 @@ struct llama_context {
     // perf
     //
 
+    // 获取性能数据
     llama_perf_context_data perf_get_data() const;
     // 重置性能数据
     void perf_reset();
 
-    llama_memory_breakdown memory_breakdown() const;
+    llama_memory_breakdown memory_breakdown() const;  // 获取内存使用情况
 
     //
     // training
     //
 
+    // 这部分代码涉及 llama.cpp 中一个比较高级且不常被普通用户看到的功能：模型优化与微调（Training/Optimization）。
+    // 虽然我们平时主要用 llama.cpp 来 运行（推理） 模型，但它其实也内置了训练模型的能力（比如支持 Adam 或 L-BFGS 优化器）。
+    // 初始化优化器的环境。
     void opt_init(struct llama_model * model, struct llama_opt_params lopt_params);
 
     // TODO: more flexible combinations of logical/physical batch size and context size
@@ -242,6 +261,7 @@ private:
     // 确保有足够的空间来存放输出。
     uint32_t output_reserve(int32_t n_outputs);
 
+    // 重新排列输出。
     void output_reorder();
 
     // map the output row index `i` to batch index
@@ -269,6 +289,7 @@ public:
     ggml_cgraph * graph_reserve(
         uint32_t n_tokens, uint32_t n_seqs, uint32_t n_outputs, const llama_memory_context_i * mctx, bool split_only = false, size_t * sizes = nullptr);
 
+    // 设置采样器。
     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
 
 private:
@@ -280,6 +301,7 @@ private:
             const llama_memory_context_i * mctx,
                           llm_graph_type   gtype) const;
 
+    // 获取图的回调。
     llm_graph_cb graph_get_cb() const;
 
     // disable auto fused ops (Flash Attention, Gated Delta Net) whose op lands on a device
@@ -288,27 +310,37 @@ private:
 
     // TODO: read/write lora adapters and cvec
     size_t state_write_data(llama_io_write_i & io);
+    // 读取状态数据。
     size_t state_read_data (llama_io_read_i  & io);
 
+    // 写入指定序列的状态数据。
     size_t state_seq_write_data(llama_io_write_i & io, llama_seq_id seq_id, llama_state_seq_flags flags);
+    // 读取指定序列的状态数据。
     size_t state_seq_read_data (llama_io_read_i  & io, llama_seq_id seq_id, llama_state_seq_flags flags);
 
     //
     // members
     //
 
+    // 模型的引用。
     const llama_model & model;
 
+    // 上下文参数。
     llama_cparams cparams;
 
+    // 适配器参数。
     llama_adapter_cvec_ptr  cvec;
+    // LoRA 适配器参数。
     llama_adapter_loras_ptr loras;
 
+    // 跨注意力（Cross-Attention）的临时处理结构。
     llama_cross cross; // TODO: tmp for handling cross-attention - need something better probably
 
+    // 内存管理。
     llama_memory_ptr memory;
 
     // decode output (2-dimensional array: [n_outputs][n_vocab])
+    // 词汇表大小（float 类型）的指针。
     buffer_view<float> logits = {nullptr, 0};
 
     // embeddings output (2-dimensional array: [n_outputs][n_embd])
@@ -330,16 +362,19 @@ private:
         // 这是一个映射表（Map），记录了每一个对话序列（seq_id）对应使用哪套采样规则（采样器）。
         std::map<llama_seq_id, llama_sampler *> samplers;
 
+        // logits: 存放经过处理后的“原始得分”。
         buffer_view<float>       logits     = {nullptr, 0};
-        buffer_view<llama_token> sampled    = {nullptr, 0};
-        buffer_view<float>       probs      = {nullptr, 0};
-        buffer_view<llama_token> candidates = {nullptr, 0};
+        buffer_view<llama_token> sampled    = {nullptr, 0};  // 这是一个缓冲区，专门用来存放最终被选中（胜出）的那个 Token ID，这就是你最后在屏幕上看到的那个词。
+        buffer_view<float>       probs      = {nullptr, 0};  // probs: 存放转化后的“百分比概率”。
+        buffer_view<llama_token> candidates = {nullptr, 0};  // 存放所有进入“决赛圈”的候选词。如果你设置了 Top-K 为 10，那么这里就存着那 10 个最有希望的备选词。
 
+        // 记录每个位置分别产生了多少个 Logits、Probs 或候选词。因为并不是每个位置都会产生相同数量的备选方案。
         std::vector<uint32_t> logits_count;
         std::vector<uint32_t> probs_count;
         std::vector<uint32_t> candidates_count;
 
         // optimization
+        // 存放完整词汇表 ID 的容器。
         std::vector<llama_token> token_ids_full_vocab;
     };
 
@@ -353,21 +388,36 @@ private:
     std::unique_ptr<llama_batch_allocr> balloc;
 
     uint32_t n_input_tensors = 0; // number of tensors marked as input during the last graph reserve
+    // 实际输出数量，记录在当前这一轮计算中，真正产生了结果（Logits 或 Embeddings）的词有多少个。
+    // 你可能一次喂给模型 10 个词，但你设置成只需要模型算出最后一个词的概率。那么 n_outputs 就是 1。
     uint32_t n_outputs = 0; // number of actually-used outputs in the current ubatch or last logical batch
 
+    // 映射批处理位置到 logits 和 embd 缓冲区的 ID。
+    // 它是一个整数数组，记录了批次中的第 i 个 Token，对应输出缓冲区里的第几个结果。
+    // 如果你只要求模型算出第 3 个和第 10 个词的概率，这个数组就会记录下这个对应关系。让程序能从一大堆计算结果中挑出需要的那几个。
     std::vector<int32_t> output_ids; // map batch token positions to ids of the logits and embd buffers
 
+    // 交换信息，用于交换两个位置的输出。
     struct swap_info {
         uint32_t i0;
         uint32_t i1;
     };
 
+    // 在并行计算中，尤其是当一部分算在 CPU，一部分算在 GPU 时，最后出来的结果可能在内存里是乱序的。
+    // output_swaps 记录了需要进行的 “位置交换”（比如把第 5 个位置和第 8 个位置的数据换一下），
+    // 从而保证最后给用户的 Logits 数组是按正确单词顺序排列的。
     std::vector<swap_info> output_swaps;
 
+    // 调度器指针，用于管理计算任务的调度。
+    // 它负责根据你电脑的硬件（你有几个 CPU 核心、几块 GPU），智能地把神经网络计算任务拆开，分别派发给最合适的芯片去执行。
     ggml_backend_sched_ptr sched;
 
+    // 如果你刚才通过代码改了大模型的一些关键参数（比如变长了上下文，或者加载了新的 LoRA 插件），
+    // 这个标记就会 true。它提醒系统：原有的计算图空间可能已经不够用了，待会儿需要重新计算并预留一次物理内存。
     bool sched_need_reserve = true;
 
+    // CPU 后端。
+    // 专门指向 CPU 处理器的指针。不管你有多少块显卡，CPU 总是作为最后的“保底”存在（保底工）。
     ggml_backend_t backend_cpu = nullptr;
     // 这是一个容器，里面装着所有可用的“加速器”。
     // 如果你电脑有 NVIDIA 显卡，这里面就有一个 CUDA 指针；如果你是苹果 M1/M2/M3，这里面就有一个 Metal 指针。
@@ -377,6 +427,8 @@ private:
     // training
     ggml_opt_context_t opt_ctx = nullptr;
 
+    // 线程池，用于并行计算。
+    // 代表了用于“逐字蹦词”的 CPU 线程池
     ggml_threadpool_t threadpool       = nullptr;
     // 代表了用于“批量阅读”（Batch processing）的 CPU 线程池
     ggml_threadpool_t threadpool_batch = nullptr;
@@ -385,6 +437,9 @@ private:
     // 中断回调函数的数据指针。
     void *              abort_callback_data = nullptr;
 
+    // 背景：不同的硬件（比如苹果 M2 芯片、NVIDIA 显卡、Intel CPU）修改线程数的方法都不一样。
+    // 功能：这个列表里存了一张“联系表”。上面记着每个计算设备对应的“修改线程数”的函数指针。
+    // 好处：当你调用 set_n_threads 时，模型不需要知道这些硬件的具体细节，它只需要按着这张“指令单”，挨个打电话通知它们改速度就行了。
     std::vector<std::pair<ggml_backend_t, ggml_backend_set_n_threads_t>> set_n_threads_fns;
 
     // pointers and buffer types used for the compute buffer of each backend
@@ -394,16 +449,23 @@ private:
 
     // Separate arenas give batches with and without outputs distinct CUDA graph cache keys.
     std::array<llm_graph_result_ptr, 2> gf_res_prev;
+    // 作用：为了提速。
+    // Graph Reuse：构建一个计算图（告诉显卡该按什么顺序算哪一层）是很费时间的。如果这一次算的 Prompt 和上一次非常像，模型会去查 gf_res_prev。
+    // 如果能复用之前的“解题思路（Graph）”，模型就不用重新画图，直接开算，大大减少了 CPU 的准备耗时。
     llm_graph_result_ptr gf_res_reserve;
 
     llm_graph_result * gf_res_prev_active = nullptr;
 
     // host buffer for the model output (logits and embeddings)
+    // 作用：存放模型算出来的结果（Logits 和 Embeddings）。
+    // 解释：模型每算完一个 Token，都会产生一堆数字（Logits），代表下一个词的概率。这些数字需要一个地方存着，等填满一个缓冲区后，再通过后端传给 CPU 或 GPU 显示出来。
+    // 简单说：它就是模型算完账后，把“账单”暂时放在这里的地方。
     ggml_backend_buffer_ptr buf_output;
 
     // keep copies of the per-sequence memory on the device
     std::map<llama_seq_id, llama_memory_buffers> mem_storage;
 
+    // 记录当前会话是否已经进行过至少一次计算。
     bool has_evaluated_once = false;
 
     // env: LLAMA_GRAPH_REUSE_DISABLE
@@ -418,9 +480,11 @@ private:
     mutable int64_t t_compute_start_us = 0;  // 当前这一次具体计算开始的瞬间。
     mutable int64_t n_queued_tokens    = 0;  // 当前这一次具体计算中，一共有多少个 Token 在排队等待处理。
 
+    // 在 Prompt 阶段一共“读过”多少个词。
     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
     // 在生成阶段一共“写出”多少个词。
     mutable int32_t n_eval   = 0; // number of eval calls
 
+    // 上一次的计算图被复用了多少次。
     mutable int32_t n_reused = 0; // number of times the previous graph was reused
 };

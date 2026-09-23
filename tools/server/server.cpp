@@ -96,6 +96,8 @@ int llama_server(int argc, char ** argv) {
     // own arguments required by this example
     common_params params;
 
+    // 初始化日志系统，让后面的 LOG_INF 等函数能正常在屏幕上说话。
+    // 告诉你当前运行的这个 llama-server 是哪个版本、用什么编译器编译的、是否是 Debug 版本。
     common_init();
 
     // start the stream session manager GC right after common init, before any HTTP route can
@@ -104,6 +106,7 @@ int llama_server(int argc, char ** argv) {
 
     SRV_INF("%s", "initializing ...\n");
 
+    // 将命令行参数解析到 params 中
     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_SERVER)) {
         return 1;
     }
@@ -136,6 +139,8 @@ int llama_server(common_params & params, int argc, char ** argv) {
     }
 
     // router server never loads a model and must not touch the GPU
+    // 如果启动时命令行参数带 -m model，就不是 router 模式, is_router_server 为 false
+    // 否则就是 router 模式, is_router_server 为 true
     const bool is_router_server = params.model.path.empty()
                                && params.model.hf_repo.empty()
                                && params.model.docker_repo.empty();
@@ -249,6 +254,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
         ctx_http.del ("/models",               ex_wrapper(models_routes->del_router_models));
     }
 
+    // 把支持的所有 API 路径挂到 HTTP 服务器上
     ctx_http.get ("/health",                   ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/v1/health",                ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/metrics",                  ex_wrapper(routes.get_metrics));

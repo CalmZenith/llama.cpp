@@ -104,19 +104,21 @@ struct llm_bigram_spm {
     };
     using queue_storage = std::vector<llm_bigram_spm>;  // 存储 bigram 的容器
     using queue = std::priority_queue<llm_bigram_spm, queue_storage, comparator>;  // 优先队列
-    llm_symbol::index left;
-    llm_symbol::index right;
+    llm_symbol::index left;  // 左边 symbol 的索引
+    llm_symbol::index right;  // 右边 symbol 的索引
     float score;  // bigram 的分数
-    size_t size;
+    size_t size;  // bigram 的总长度
 };
 
 struct llm_tokenizer_spm : llm_tokenizer {
     llm_tokenizer_spm(const llama_vocab & /*vocab*/) {}
 };
 
+// spm 执行单次分词任务的算法引擎
 struct llm_tokenizer_spm_session {
     llm_tokenizer_spm_session(const llama_vocab & vocab) : vocab(vocab) {}
 
+    // 这里送进来的是已经切分过特殊字符的文本
     void tokenize(const std::string & text, std::vector<llama_token> & output) {
         // split string into utf8 chars
         int index = 0;
@@ -127,7 +129,7 @@ struct llm_tokenizer_spm_session {
             sym.text = text.c_str() + offs;  // 指向当前字符在原始字符串中的位置
             sym.n = std::min(len, text.size() - offs);  // 实际长度，防止越界
             offs += sym.n;
-            sym.prev = index - 1;
+            sym.prev = index - 1;  // 前一个 symbol 的索引
             sym.next = offs == text.size() ? -1 : index + 1;  // 后一个 symbol 的索引
             index++;
             symbols.emplace_back(sym);
@@ -169,6 +171,7 @@ struct llm_tokenizer_spm_session {
             try_add_bigram(bigram.left, left_sym.next);
         }
 
+        // 执行到这一步循环之前，symbols 里的每个元素都是一个字符（长度为 1），或者是一个已经合并好的大块（长度 > 1）。
         for (int i = 0; i != -1; i = symbols[i].next) {
             auto & symbol = symbols[i];
             resegment(symbol, output);
@@ -188,6 +191,7 @@ private:
 
         const auto p = rev_merge.find(text);
 
+        // 这个 Symbol 既不是预定义的 Token，也不是通过两两合并产生的。它可能是某个非法字符，或者是模型完全没见过的东西。
         if (p == rev_merge.end()) {
             // output any symbols that did not form tokens as bytes.
             // output any symbols that did not form tokens as bytes.
@@ -200,10 +204,12 @@ private:
             return;
         }
 
+        // 这个合并后的 Symbol 对应的 Token 存在，但是这个块在词典里没有 ID，所以需要递归地拆解它，直到找到最基础的 Token 为止。
         resegment(symbols[p->second.first], output);
         resegment(symbols[p->second.second], output);
     }
 
+    // 尝试将两个相邻的 symbol 合并成一个 token
     void try_add_bigram(int left, int right) {
         if (left == -1 || right == -1) {
             return;
@@ -237,7 +243,7 @@ private:
     // currently unused
     // const llm_tokenizer_spm * spm_tokenizer;
 
-    std::vector<llm_symbol> symbols;
+    std::vector<llm_symbol> symbols;  // 拆分后的字符列表
     llm_bigram_spm::queue work_queue;  // 待合并的 bigram 队列
     std::map<std::string, std::pair<int, int>> rev_merge;  // 合并后的 bigram 映射
 };
@@ -277,11 +283,11 @@ struct llm_bigram_bpe {
     // Rank 值越小的二元组，在堆里的优先级反而越高。
     // 如果两个合并项的 Rank 一样大，那就看 left（即位置）。位置越靠前的（left 越小的），优先级越高。
     using queue = llama_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
-    llm_symbol::index left;
-    llm_symbol::index right;
-    std::string text;
+    llm_symbol::index left;  // 左侧字符的索引
+    llm_symbol::index right;  // 右侧字符的索引
+    std::string text;  // 合并后的文本
     int rank;  // 优先级
-    size_t size;
+    size_t size;  // 长度
 };
 
 struct llm_tokenizer_bpe : llm_tokenizer {
@@ -289,6 +295,7 @@ struct llm_tokenizer_bpe : llm_tokenizer {
         GGML_ASSERT(vocab.get_type() == LLAMA_VOCAB_TYPE_BPE);
         switch (vocab.get_pre_type()) {
             case LLAMA_VOCAB_PRE_TYPE_LLAMA3:
+                // 正则表达式，代表一套切词规则，比如 '[sS]' 代表切开 ' ' 和字母 sS
                 regex_exprs = {
                     // original regex from tokenizer.json
                     //"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
@@ -623,9 +630,12 @@ struct llm_tokenizer_bpe_session {
         }
     }
 
+    // 传入的是 fragment.raw_text
     virtual void tokenize(const std::string & text, std::vector<llama_token> & output) {
         int final_prev_index = -1;  // 记录上一个 Token 最后字符的索引，用于构建双向链表
-        const auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);
+        // word_collection 接收的是一个经过分词的数组，里面每个元素都是一个词块，但是对应的字节可能有变化
+        // 比如原始文本是“Hi ”，切分后变成两块：{"Hi", " "}，映射后变成{"Hi", "Ġ"}
+        const auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);  // regex_exprs 是一个正则表达式列表，用于将文本分割成词
 
         symbols_final.clear();
         auto tok_pre = vocab.get_pre_type();
@@ -664,17 +674,22 @@ struct llm_tokenizer_bpe_session {
                 index++;
                 symbols.emplace_back(sym);
             }
+            // 假设第一个 word 是 “apple” 且 vocab.get_ignore_merges() == flase && vocab.text_to_token(word) == LLAMA_TOKEN_NULL
+            // 那么 symbols 数组就是 [{"a", 1, -1, 1}, {"p", 1, 0, 2}, {"p", 1, 1, 3}, {"l", 1, 2, 4}, {"e", 1, 3, -1}]
+            // 那么 work_queue（小顶堆）可能里面就会有 {"le", 3, 4, 5, 2}, {"pp", 1, 2, 10, 2}, {"ap", 0, 1, 30, 2}, {"pl", 2, 3, 100, 2}
             for (int i = 1; i < (int) symbols.size(); ++i) {
                 add_new_bigram(i - 1, i);
             }
 
             // build token(s)
+            // 假设 work_queue 里面有 {"le", 3, 4, 5, 2}, {"pp", 1, 2, 10, 2}, {"ap", 0, 1, 30, 2}, {"pl", 2, 3, 100, 2}
             while (!work_queue.empty()) {
                 auto bigram = work_queue.pop_move();
 
                 auto & left_symbol = symbols[bigram.left];
                 auto & right_symbol = symbols[bigram.right];
 
+                // 身份校验，BPE 是一个 动态变化 的过程，可能当你准备合并 a+p 时，之前的某次操作已经把其中的 p 给合到别的地方去了。
                 if (left_symbol.n == 0 || right_symbol.n == 0) {
                     continue;
                 }
@@ -731,6 +746,9 @@ struct llm_tokenizer_bpe_session {
                 const std::string str = std::string(symbol.text, symbol.n);
                 const auto token = vocab.text_to_token(str);
 
+                // 如果万一（极少数情况）合并出来的字符串在词表里找不到 ID，比如一个新型表情包，
+                // 因为这个符号太新了，词表里 没有任何关于它的合并规则（Merge Table）。
+                // 所以 BPE 循环跑完后，它依然作为一个独立的、未合并的字符留在 symbols_final 里。这里就会把这个字符拆成字节
                 if (token == LLAMA_TOKEN_NULL) {
                     for (auto j = str.begin(); j != str.end(); ++j) {
                         llama_token token_multibyte = LLAMA_TOKEN_NULL;
@@ -766,6 +784,8 @@ private:
 
         int rank_found = -1;
 
+        // 进 vocab 结构体里面查询 BPE 合并规则表，如果表里说“这两个不能合”，返回 -1
+        // 如果表里有这对组合，返回它的 Rank（排名）。比如返回 15
         rank_found = vocab.find_bpe_rank(left_token, right_token);
 
         if (rank_found < 0) {
@@ -1524,6 +1544,7 @@ struct llm_tokenizer_plamo2 : llm_tokenizer {
         }
     }
 
+    // raw_text 是 “未经加工的原始文本”，没有经过正则切割，没有经过 Unicode 标准化，没有经过空格处理
     std::vector<llama_token> encode(const std::string & text) const {
         std::vector<uint32_t> unicode_data = unicode_cpts_from_utf8(text);
         // Skip the first code point if it is a BOM (Byte Order Mark)
@@ -1784,6 +1805,7 @@ typedef enum FRAGMENT_BUFFER_VARIANT_TYPE {
 } FRAGMENT_BUFFER_VARIANT_TYPE;
 
 struct fragment_buffer_variant {
+    // 构造函数：传入一个 Token ID
     fragment_buffer_variant(llama_token _token)
     :
         type(FRAGMENT_BUFFER_VARIANT_TYPE_TOKEN),
@@ -1792,6 +1814,7 @@ struct fragment_buffer_variant {
         offset(0),
         length(0) {}
 
+    // 构造函数：传入原始文本、起始位置和长度
     fragment_buffer_variant(const std::string & _raw_text, int64_t _offset, int64_t _length)
     :
         type(FRAGMENT_BUFFER_VARIANT_TYPE_RAW_TEXT),
@@ -1817,7 +1840,7 @@ struct llama_vocab::impl {
     uint32_t n_token_types = 0; // for BERT-style token types
 
     std::string tokenizer_model;  // 分词算法名称，llama 会通过比对这个字符串，来决定内部到底该调用哪一套代码来加载词表权重。
-    std::string tokenizer_pre;
+    std::string tokenizer_pre;  // 预处理规则名称, llama 会搜索自己的 “正则库”，找出一个匹配该名字的正则来处理输入文本。
 
     enum llama_vocab_type     type     = LLAMA_VOCAB_TYPE_SPM;  // SentencePiece
     enum llama_vocab_pre_type pre_type = LLAMA_VOCAB_PRE_TYPE_DEFAULT;
@@ -3274,6 +3297,7 @@ void llama_vocab::impl::tokenizer_st_partition(std::forward_list<fragment_buffer
         const auto & data = vocab.get_token_data(special_id);
         const auto & text = data.text;
 
+        // 不解析特殊字符并且当前这个 Token 是 [控制符 (CONTROL)] 或者 [未知符 (UNKNOWN)]
         if (!parse_special && (data.attr & (LLAMA_TOKEN_ATTR_CONTROL | LLAMA_TOKEN_ATTR_UNKNOWN))) {
             // Ignore control and unknown tokens when parse_special == false
             continue;
@@ -3403,10 +3427,12 @@ std::string llama_vocab::impl::token_to_piece_for_cache(llama_token token, bool 
     return piece;
 }
 
+// 把 text 里所有的普通空格 " " 替换成 UTF-8 编码为 \xe2\x96\x81 的特殊符号 "▁"
 static void llama_escape_whitespace(std::string & text) {
     replace_all(text, " ", "\xe2\x96\x81");
 }
 
+// 把 text 里所有的特殊符号 "\xe2\x96\x81" 替换成普通空格 " "
 static void llama_unescape_whitespace(std::string & word) {
     replace_all(word, "\xe2\x96\x81", " ");
 }
@@ -3437,16 +3463,19 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
         bool parse_special) const {
     GGML_ASSERT(tokenizer && "Tokenizer not initialized. Call llama_vocab::init_tokenizer() first.");
 
+    // 用来存放分词结束后最终生成的 Token ID 序列
     std::vector<llama_token> output;
     // 用来存放待处理的文本片段（可能是原始字符串，也可能是已经分好的 Token）
     std::forward_list<fragment_buffer_variant> fragment_buffer;
 
+    // 如果原始文本不为空，将其添加到 fragment_buffer 中，并调用 tokenizer_st_partition 进行分词
     if (!raw_text.empty()) {
         fragment_buffer.emplace_front(raw_text, 0, raw_text.length());
         tokenizer_st_partition(fragment_buffer, parse_special);
     }
 
     switch (get_type()) {
+        // 如果是 SPM（SentencePiece Model）类型的分词器
         case LLAMA_VOCAB_TYPE_SPM:
             {
                 // OG tokenizer behavior:
@@ -3461,21 +3490,26 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                 // 标记前一个 token 是否是特殊 token
                 bool is_prev_special = true;  // prefix with space if first token
 
+                // 如果需要添加特殊 token 且需要添加 BOS（Beginning of Sequence）
                 if (add_special && add_bos) {
                     GGML_ASSERT(special_bos_id != LLAMA_TOKEN_NULL);
                     output.push_back(special_bos_id);
                     is_prev_special = true;
                 }
 
+                // 遍历分特殊词后的文本片段
                 for (const auto & fragment : fragment_buffer) {
+                    // 如果是原始文本片段
                     if (fragment.type == FRAGMENT_BUFFER_VARIANT_TYPE_RAW_TEXT) {
                         std::string text;
 
                         // prefix with space if previous is special
+                        // 如果需要添加前缀空格且前一个 token 是特殊 token
                         if (add_space_prefix && is_prev_special) {
                             text = ' ';
                         }
 
+                        // 将原始文本片段添加到 text 中
                         text += fragment.raw_text.substr(fragment.offset, fragment.length);
 
 #ifdef PRETOKENIZERDEBUG
@@ -3491,6 +3525,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     }
                 }
 
+                // 如果需要添加特殊 token 且需要添加 BOS，并且分词后的结果以 BOS 开头
                 if (add_special && add_bos && output.size() >= 2 && output[1] == special_bos_id) {
                     LLAMA_LOG_WARN(
                         "%s: Added a BOS token to the prompt as specified by the model but the prompt "
@@ -3503,6 +3538,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     output.push_back(special_eos_id);
                 }
             } break;
+        // 如果是 BPE（Byte Pair Encoding）类型的分词器
         case LLAMA_VOCAB_TYPE_BPE:
             {
                 // it calls some other methods that are not exist in llm_tokenizer,
@@ -3543,6 +3579,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     session->check_double_bos_eos(output);
                 }
             } break;
+        // 如果是 WPM（WordPiece Model）类型的分词器
         case LLAMA_VOCAB_TYPE_WPM:
             {
                 if (add_special) {
@@ -3570,8 +3607,10 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     output.push_back(special_sep_id);
                 }
             } break;
+        // 如果是 UGM（Unigram Model）类型的分词器
         case LLAMA_VOCAB_TYPE_UGM:
             {
+                // 如果需要添加特殊 token 且需要添加 BOS（Beginning of Sequence）
                 if (add_special && add_bos) {
                     GGML_ASSERT(special_bos_id != LLAMA_TOKEN_NULL);
                     output.push_back(special_bos_id);
@@ -3602,6 +3641,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     output.push_back(special_eos_id);
                 }
             } break;
+        // 如果是 RWKV 类型的分词器
         case LLAMA_VOCAB_TYPE_RWKV:
             {
                 llm_tokenizer_rwkv_session session(vocab, *static_cast<const llm_tokenizer_rwkv *>(tokenizer.get()));
@@ -3619,6 +3659,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     }
                 }
             } break;
+        // 如果是 PLAMO2 类型的分词器
         case LLAMA_VOCAB_TYPE_PLAMO2:
             {
                 llm_tokenizer_plamo2_session session(*static_cast<const llm_tokenizer_plamo2 *>(tokenizer.get()));
@@ -3680,6 +3721,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
     return output;
 }
 
+// token 转文字，token: 词元 ID，buf: 输出缓冲区，length: 输出缓冲区长度，lstrip: 去除前导空格数，special: 是否解析特殊字符
 int32_t llama_vocab::impl::token_to_piece(llama_token token, char * buf, int32_t length, int32_t lstrip, bool special) const {
     // ref: https://github.com/ggml-org/llama.cpp/pull/7587#discussion_r1620983843
     static const int attr_special = LLAMA_TOKEN_ATTR_UNKNOWN | LLAMA_TOKEN_ATTR_CONTROL;
@@ -4247,11 +4289,13 @@ int32_t llama_vocab::tokenize(
         return std::numeric_limits<int32_t>::min();
     }
 
+    // 如果提供的数组空间不够大，返回负值表示需要更多空间
     if (n_tokens_max < (int) res.size()) {
         // LLAMA_LOG_ERROR("%s: too many tokens\n", __func__);
         return -((int) res.size());
     }
 
+    // 将分好的 Token 复制到传入的数组中
     for (size_t i = 0; i < res.size(); i++) {
         tokens[i] = res[i];
     }
@@ -4523,6 +4567,11 @@ llama_token llama_token_fim_sep(const struct llama_vocab * vocab) {
 // tokenization
 //
 
+// vocab: 指向模型词表的指针；
+// text: 待分词的文本；
+// n_tokens_max: 结果数组的最大长度；
+// add_special: 是否添加特殊标记（如 BOS/EOS）；
+// parse_special: 是否把文本中的特殊标记字符串（如 <|im_start|>）直接解析成对应的 Special Token ID
 int32_t llama_tokenize(
     const struct llama_vocab * vocab,
                   const char * text,

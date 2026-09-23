@@ -249,6 +249,7 @@ struct server_slot {
     mtmd::batch_ptr mbatch = nullptr;
 
     // speculative decoding
+    // spec 本身通常是一个指针（指向投机采样器的对象）。
     common_speculative * spec;
 
     llama_tokens spec_draft;
@@ -276,6 +277,8 @@ struct server_slot {
 
     size_t last_nl_pos = 0;
 
+    // 来拼接已经生成出来的每个字的草稿本。为啥不生成一个发一个，还要存草稿？
+    // 因为需要不断在这串草稿文本里去寻找：“有没有提前触发客户设定的 Stop Word (停止词) ？”
     std::string  generated_text;
     std::string  debug_generated_text;
     llama_tokens generated_tokens;
@@ -301,6 +304,7 @@ struct server_slot {
             return false;
         }
 
+        // 算出需要往内存/磁盘存储的数据 size
         const size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
         const size_t cur_size_dft = ctx_dft ? llama_state_seq_get_size_ext(ctx_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
 
@@ -455,7 +459,7 @@ struct server_slot {
     }
 
     // returns -1 if the generation is limitless
-    int32_t n_remaining() const {
+    int32_t n_remaining() const {  // 还需要解码多少个词
         return n_predict_max == -1 ? -1 : n_predict_max - (int32_t) stats.n_gen;
     }
 
@@ -2376,6 +2380,8 @@ private:
     }
 
     // returns false to decline the task, it is offered again after the decode is done
+    // 将 task 分发给对应的 slot 处理
+    // 核心流程包括：寻位，排队，启动
     bool process_single_task(server_task && task, bool is_yielding) {
         // while yielding, an encode / decode is running and only reading the server state is safe
         if (is_yielding && task.type != SERVER_TASK_TYPE_METRICS && task.type != SERVER_TASK_TYPE_SLOT_GET) {
@@ -2548,6 +2554,7 @@ private:
                 } break;
             case SERVER_TASK_TYPE_SLOT_SAVE:
                 {
+                    // 用户可以通过 id_slot 参数来指定某个槽位，-1 表示默认不指定
                     const int id_slot = task.slot_action.id_slot;
                     server_slot * slot = get_slot_by_id(id_slot);
                     if (slot == nullptr) {
@@ -2794,6 +2801,7 @@ private:
     };
 #endif
 
+    // 拼凑出下一辆发往 GPU 的大卡车 —— llama-batch
     void update_slots() {
 #ifdef DEBUG_TIMINGS
         static int64_t t_prev = 0;
@@ -2868,16 +2876,26 @@ private:
             llama_set_embeddings(ctx_tgt, slot_batched->need_embd());
         }
 
+        // batch_view 不是一个新的数组。它只是一个临时的“小窗口”，通过指针偏移（比如 batch.token + off），它“望向”了大货车里某一段特定的货物。
         llama_batch batch_view;
         int32_t off_next = 0;
         int32_t n_batch = llama_n_batch(ctx_tgt);
+        // 如果 n_batch 减半了，那么最开始的循环就会执行大于 1 次：
+        // n_tokens = std::min(n_batch, batch.size() - off)，原本 n_batch == batch.n_tokens 时循环只执行一次，
+        // 现在 n_batch < batch.size() - off，所以循环就会执行多次。
         for (int32_t off = 0; off < batch.size(); off = off_next) {
+            // batch 是一个逻辑大包，它是这一批次服务器调度员从所有 Slot 里收集上来的所有 Token 的总集合。
+            // n_batch 是一个配置参数，它规定了一次 llama_decode 调用能吞下的最大 Token 数量。
+            // u_batch 是物理批大小，是一个优化参数：n_batch 决定了 “一次算多少个词”，
+            // n_ubatch 决定了 “每个词在 GPU 矩阵乘法里排队的姿势”。
+            // GPU 内部为了矩阵乘法能跑满带宽，会把这 n_batch 个 Token 按照 n_ubatch 的节奏进行物理切片计算。
             const int32_t n_tokens = std::min(n_batch, batch.size() - off);
             try {
                 scoped_timer t(t_decode, n_decode);
                 // TODO @ngxson : maybe handle n_batch == 1 here instead of inside decode()
 
                 batch_view = batch.get_view(off, n_tokens);
+                // 底层 llama_decode 返回值：0 代表成功；1 代表显存溢出，KVCache 已满；-1 代表输入 batch 无效；小于 -1 代表计算错误
                 bool ok = decode(n_batch, off, batch_view);
 #ifdef DEBUG_TIMINGS
                 llama_synchronize(ctx_tgt);
@@ -3116,6 +3134,7 @@ private:
             bool add_ok = true; // false means the batch is full, skip remaining slots
 
             iterate(slots, [&](server_slot & slot) {
+                // 这里还有一层判断是防止出现如下场景：前面的 slot 已经将 batch 填满了，外层循环还在不断的遍历剩余的 slot
                 if (!add_ok || batch.size() >= n_batch) {
                     return; // batch is full, skip remaining slots
                 }
@@ -3185,6 +3204,7 @@ private:
                             return;
                         }
 
+                        // 处理图片类就不可以 split，文本类可以 split
                         if (!slot.can_split()) {
                             if (slot.task->n_tokens() > n_ubatch) {
                                 send_error(slot,
@@ -3218,6 +3238,7 @@ private:
                                 return;
                             }
 
+                            // 是否复用之前 slot 的 KV 缓存
                             if (slot.task->params.cache_prompt) {
                                 // reuse any previously computed tokens that are common with the new prompt
                                 n_past = slot.prompt.tokens.get_common_prefix(input_tokens);
@@ -3228,6 +3249,8 @@ private:
                                     n_past = std::min(n_past, slot.alora_invocation_start - 1);
                                 }
 
+                                // 需要多少个词才值得启用 cache 平移
+                                // 这里的平移是针对 cache 的，即前面匹配上，中间未匹配上，后面又匹配上了
                                 const auto n_cache_reuse = slot.task->params.n_cache_reuse;
 
                                 // 检查硬件是否支持 RoPE 位置平移以及是否非多模态数据（多模态数据肯定不支持）
@@ -3355,6 +3378,7 @@ private:
                                     SLT_WRN(slot, "%s\n", st1.str().c_str());
                                 }
 
+                                // 大于阈值，说明需要往前寻找一个新的 checkpoint
                                 if (pos_min >= pos_min_thold) {
                                     // search for a context checkpoint
                                     const auto it = std::find_if(
@@ -3611,6 +3635,7 @@ private:
                         slot.stats.n_gen = 0;
                         slot.i_batch     = batch.size() - 1;
 
+                        // 其实是在做让采样器记住 prompt 里的词从而在 decode 时做重复惩罚和语法限制
                         slot.init_sampler();
                     } else {
                         // skip ordinary mid-prompt checkpoints, unless the batch starts a user
@@ -3783,6 +3808,8 @@ private:
 
                     GGML_ASSERT(child->state == SLOT_STATE_WAIT_OTHER);
 
+                    // 这个函数将父任务的状态拷贝给子任务
+                    // 子任务得到了父任务的 i_batch 就可以赶上这趟后续的采样了
                     slot.copy_state_to(*child);
                     child->state = SLOT_STATE_DONE_PROMPT;
                 }
@@ -3808,6 +3835,7 @@ private:
             }
         });
 
+        // 如果模型吐出了一个特殊 Token（比如 [EOS] 结束符），我们是否允许把它亮给用户看？
         auto accept_special_token = [&](server_slot & slot, llama_token token) {
             return params_base.special ||
                 slot.task->params.sampling.preserved_tokens.find(token) != slot.task->params.sampling.preserved_tokens.end();
@@ -3838,6 +3866,7 @@ private:
                     return;
                 }
 
+                // 针对 rerank 重排序任务的
                 if (slot.task->type == SERVER_TASK_TYPE_RERANK) {
                     send_rerank(slot, batch_view);
                     slot.release();
@@ -3851,6 +3880,11 @@ private:
                 slot.state = SLOT_STATE_GENERATING;
 
                 if (slot.can_speculate()) {
+                    // 这个函数的作用是同步知识背景
+                    // 投机采样通常涉及两个模型：一个大的和一个小的，此时大模型刚刚读完了 Prompt，它的 KV Cache 是满的。
+                    // 但那个负责干活的小模型（Draft Model）可能还不清楚现在的对话背景。
+                    // 这个函数会告诉小模型：“听好了，现在的对话背景是这一堆词，你赶紧同步一下你的进度，准备开始大胆猜测后面的词吧！”
+                    // 它标志着一个 “新生成周期” 的开始。执行完这行，小模型就正式进入了“待命”状态。
                     common_speculative_begin(spec.get(), slot.id, slot.prompt.tokens.get_text_tokens());
                 }
             } else if (slot.state != SLOT_STATE_GENERATING) {
@@ -3862,16 +3896,18 @@ private:
             }
 
             // shifted according to the current sub-batch
-            const int tok_idx = slot.i_batch - off;
+            const int tok_idx = slot.i_batch - off;  // 还是因为被分段了，要不然不用修改
 
             llama_token id;
             {
                 scoped_timer timer(t_sampl, n_sampl);
+                // 利用采样器的种种规则，选取下一个 token
                 id = common_sampler_sample(slot.smpl.get(), slot.ctx_tgt, tok_idx);
             }
 
             slot.i_batch = -1;
 
+            // 放入采样器的缓存中，是为了进行重复惩罚的
             common_sampler_accept(slot.smpl.get(), id, true);
 
             // here we have synchronized the llama_context (due to the sampling above), so we can do time measurement
@@ -3879,6 +3915,7 @@ private:
 
             slot.stats.n_gen += 1;
 
+            // 首字延迟指标
             if (slot.stats.n_gen == 1) {
                 slot.stats.update_prompt_last();
                 slot.t_print_last = t_now;
@@ -3887,15 +3924,20 @@ private:
 
             slot.stats.update_gen_last();
 
+            // 这一段是在将刚才的那个 token 转换成 piece（因为一个 token id 可能只对应一个词的一部分）
+            // 然后将对应信息存放在 result 中
             completion_token_output result;
             result.tok          = id;
             result.text_to_send = common_token_to_piece(slot.ctx_tgt, result.tok, accept_special_token(slot, result.tok));
             result.prob         = 1.0f; // TODO: set it here instead of doing inside populate_token_probs
 
+            // 这个函数是为了获取选择这个 token 时其他可能 token 的概率
             if (slot.task->params.sampling.n_probs > 0) {
                 populate_token_probs(slot, result, slot.task->params.post_sampling_probs, params_base.special, tok_idx);
             }
 
+            // process_token 函数会将新生成的字发给用户，并且进行一些检查比如是否是结束符，有没有撞上用户设置的停止序列等
+            // 返回值为 true 表示任务还没有结束，返回值为 false 表示任务已经结束于是进入到这个分支
             if (!process_token(result, slot)) {
                 // release slot because of stop condition
                 slot.print_timings();
@@ -3916,6 +3958,10 @@ private:
             }
 
             // save the original draft size
+            // slot.i_batch_dft —— 位置，它是小模型在 GPU 大巴车上的 “座位号”
+            // 大模型一次性算了 512 个词，我们需要知道小模型的那 3 个草稿词分别对应的是哪 3 组概率数据
+            // slot.spec_draft —— 投机生成的内容，存储的是具体的 token id。
+            // 等大模型算完概率后，我们需要拿着这个列表去跟大模型的建议做对比，看看字儿对不对。
             const size_t n_draft = slot.spec_draft.size();
 
             GGML_ASSERT(n_draft > 0);
@@ -4082,6 +4128,7 @@ private:
     }
 
     // has_output is computed by the caller, which also already synchronized the context if it is set
+    // 性能指标函数
     void metrics_post_decode(int32_t off, int32_t n_tokens, bool has_output) {
         metrics.n_decode++;
         for (const auto & slot : slots) {
@@ -4094,6 +4141,7 @@ private:
         // apply enqueued prompt tokens stats
         // note: a slot can be released before we get here, which clears its stats
         //       the tokens were still computed, counted in the global metrics, not in slot
+        // 实际重新计算的字数，本次任务无可奈何只能让显卡重新算的 Token 量
         uint64_t n_prompt_tokens = 0;
 
         for (int i = off; i < off + n_tokens; ++i) {
@@ -4308,11 +4356,15 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         // process prompt
         std::vector<server_tokens> inputs;
 
+        // res_type != TASK_RESPONSE_TYPE_NONE 判断当前请求是否为兼容 OpenAI 的 ChatComplete 请求
+        // ctx_server.mctx != nullptr 判断当前是否启用了多模态功能（即是否成功初始化了 mtmd::context）
         if (res_type != TASK_RESPONSE_TYPE_NONE && ctx_server.mctx != nullptr) {
             // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
+            // 处理 OpenAI 兼容的 ChatComplete 请求（可能包含多模态输入）
             inputs.push_back(process_mtmd_prompt(ctx_server.mctx, prompt.get<std::string>(), files, ctx_server.init_opt));
         } else {
             // Everything else, including multimodal completions.
+            // 处理其他所有类型的请求（包括非 OAI 兼容的多模态 completions）
             inputs = tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
         }
 
@@ -4323,12 +4375,15 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         auto delimiters = common_chat_msg_delimiters_parse(delims);
         delimiters.tokenize(ctx_server.vocab);
 
+        // 遍历所有已分词的 Prompt（支持批量请求），为每个输入创建一个独立的推理任务
         for (size_t i = 0; i < inputs.size(); i++) {
             // 创建新的推理任务
             server_task task = server_task(type);
 
+            // 为当前任务生成并设置唯一 ID
             task.id = rd.get_new_id();
 
+            // 将分词后的输入数据移动到任务中
             task.tokens = std::move(inputs[i]);
             task.params = server_schema::eval_llama_cmpl_schema(
                     ctx_server.vocab,
@@ -4665,6 +4720,7 @@ json server_routes::get_model_info() const {
     return get_res_model_info(*meta);
 }
 
+// 其实就是在给 server_routes 结构体里的每一个 handler 赋值
 void server_routes::init_routes() {
     // IMPORTANT: all lambda functions must start with create_response()
     // this is to ensure that the server_res_generator can handle sleeping case correctly
@@ -4786,6 +4842,7 @@ void server_routes::init_routes() {
         return res;
     };
 
+    // KV 缓存状态管理（存档/读档/移除）接口
     this->post_slots = [this](const server_http_req & req) {
         auto res = create_response();
         if (params.slot_save_path.empty()) {
@@ -4819,6 +4876,7 @@ void server_routes::init_routes() {
         return res;
     };
 
+    // 服务器属性查询
     this->get_props = [this](const server_http_req &) {
         auto res = create_response(true);
         // note: do NOT use ctx_server here, this endpoint must be accessible during sleep
@@ -4921,10 +4979,15 @@ void server_routes::init_routes() {
             TASK_RESPONSE_TYPE_NONE); // infill is not OAI compatible
     };
 
+    // post_completions 路由绑定逻辑
     this->post_completions = [this](const server_http_req & req) {
+        // 1. 创建响应生成器（包含结果读取器 rd）
         auto res = create_response();
+        // 2. 准备多模态文件的占位容器（此处为空）
         std::vector<raw_buffer> files; // dummy
+        // 3. 将 HTTP Body 的二进制流解析为 JSON 对象
         const json body = json::parse(req.body);
+        // 4. 将解析出的 JSON 转交给统一的补全工厂函数
         return handle_completions_impl(
             req,
             SERVER_TASK_TYPE_COMPLETION,

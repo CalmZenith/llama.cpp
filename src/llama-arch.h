@@ -720,10 +720,14 @@ enum llm_tensor_layer {
     LLM_TENSOR_LAYER_OUTPUT,
 };
 
+// 辅助结构体，用于生成张量名称
+// 在 GGUF 格式中，元数据的键名通常与模型架构相关。
+// 比如“层数”这个属性，对于 Llama 架构叫 llama.block_count，对于 GPT-2 架构则叫 gpt2.block_count。
+// 这个结构体就是为了自动处理这种差异。
 struct LLM_KV {
     LLM_KV(llm_arch arch, const char * suffix = nullptr);
 
-    llm_arch arch;
+    llm_arch arch;  // 模型架构
     const char * suffix;  // 可选后缀
 
     std::string operator()(llm_kv kv) const;

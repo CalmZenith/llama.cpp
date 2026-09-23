@@ -1710,6 +1710,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
     // so accept either present rather than requiring exactly one.
     GGML_ASSERT(batch_inp.token || batch_inp.embd);
 
+    // [P2] Decode orchestrator entry.
     if (!memory) {
         LLAMA_LOG_DEBUG("%s: cannot decode batches with this context (calling encode() instead)\n", __func__);
         return encode(batch_inp);
@@ -1766,6 +1767,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
         }
     }
 
+    // [P2] Normalize/validate the user batch.
     if (!balloc->init(batch_inp, vocab, memory.get(), n_embd, n_seq_max, output_all)) {
         LLAMA_LOG_ERROR("%s: failed to initialize batch\n", __func__);
         return -1;
@@ -1808,6 +1810,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
     // handle any pending shifts/copies
     memory_update(false);
 
+    // [P3] KV/memory planning stage.
     llama_memory_context_ptr mctx;
 
     while (true) {
@@ -1871,6 +1874,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
         const auto & ubatch = mctx->get_ubatch();
 
         // count the outputs in this ubatch
+        // [P4] Graph execution stage.
         {
             int32_t n_outputs_new = 0;
 
@@ -2051,6 +2055,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
     n_outputs = n_outputs_all;
 
     // set output mappings
+    // [P2] Final output shaping for API consumers.
     if (n_outputs > 0) {
         bool sorted_output = true;
 
@@ -3796,11 +3801,17 @@ llama_context * llama_init_from_model(
         }
     }
 
+    // 这段代码是一个 “严格的数学对齐检查”。它的作用是确保 “高性能加速（Flash Attention）” 和 “显存压缩（量化 KV Cache）”
+    // 这两项技术能同时兼容，而不会导致程序崩溃。
+    // 如果 用户想要开启 Flash Attention，同时对 K 缓存 进行了量化处理（比如用了 Q4_0 或 Q8_0 来节省显存）
     if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_DISABLED && ggml_is_quantized(params.type_k)) {
         // 量化技术（比如 Q4_0）并不是一个字节存一个数，而是 “打包处理”。比如 Q4_0 每 32 个数字会被打包成一个“块”，共用一个缩放系数。
         // 这里的 blck_size 就是这个“包”的大小（通常是 32）。
         const uint32_t blck_size = ggml_blck_size(params.type_k);
         for (uint32_t il = 0; il < model->hparams.n_layer(); ++il) {
+            // 检查量化块大小是否能整除模型的头维度
+            // n_embd_head_k 是模型中每一个注意力头（Attention Head）的维度大小（比如 128 或 96）。
+            // 冲突点：Flash Attention 的 GPU 算子对内存对齐的要求极其苛刻，它要求每个头的维度必须能被量化块的大小整除。
             if (model->hparams.n_embd_head_k(il) % blck_size != 0) {
                 LLAMA_LOG_ERROR("%s: K cache type %s with block size %u does not divide n_embd_head_k=%u\n",
                     __func__, ggml_type_name(params.type_k), blck_size, model->hparams.n_embd_head_k(il));
@@ -3809,6 +3820,9 @@ llama_context * llama_init_from_model(
         }
     }
 
+    // 在 llama.cpp 中，K 缓存 和 V 缓存 的数据类型是可以独立设置的。
+    // 你可能希望 K 缓存用更精准的 Q8_0（量化块大小为 32），而 V 缓存用更省显存的 Q4_0（量化块大小也是 32，但压缩率更高）。
+    // 既然类型可能不同，那么它们的 blck_size（量化块大小）就有可能不同，因此必须分开提取并分别检查。
     if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_DISABLED && ggml_is_quantized(params.type_v)) {
         const uint32_t blck_size = ggml_blck_size(params.type_v);
         for (uint32_t il = 0; il < model->hparams.n_layer(); ++il) {

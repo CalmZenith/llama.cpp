@@ -617,8 +617,12 @@ struct llama_model {
     // llama.cpp 通过这个参数来决定加载哪一套计算逻辑（算子）。
     llm_arch arch = LLM_ARCH_UNKNOWN;
 
+    // 模型名称，通常是从 .gguf 文件元数据中读出来的
+    // 比如文件里写了 general.name = "Qwen2.5-7B-Instruct"，这个字符串就会存在这里。如果加载模型失败，日志里通常会打印这个名字。
     std::string name = "n/a";
 
+    // 模型超参数保存了模型所有的“尺寸”信息，即从gguf里面获取的数据
+    // 定义了这个大模型物理上的数学结构，如特征维度是多少、有多少个注意力头、模型一共有多少层等，不可修改
     llama_hparams hparams = {};
     // 词表
     llama_vocab   vocab;
@@ -626,12 +630,22 @@ struct llama_model {
     // for classifier models
     std::vector<std::string> classifier_labels;
 
+    // 入口阶段：嵌入层
+    // tok_embd 是一张巨大的查找表，每一行对应词表里的一个词，存的是这个词的初始数学特征
+    // type_embd 用于区分不同序列。比如在 BERT 模型里，一段话有 A 句和 B 句，它用来告诉模型哪个词属于 A，哪个属于 B
+    // pos_embd 位置编码，给向量加上“我是第几个词”的信息（现代 Llama 模型多改用 RoPE 旋转位置编码，这里可能为空）。
+    // tok_norm 和 tok_norm_b 嵌入层之后的归一化权重和偏置。用来稳定数值，防止第一层输出的数值炸掉。
     struct ggml_tensor * tok_embd   = nullptr;
     struct ggml_tensor * type_embd  = nullptr;
     struct ggml_tensor * pos_embd   = nullptr;
     struct ggml_tensor * tok_norm   = nullptr;
     struct ggml_tensor * tok_norm_b = nullptr;
 
+    // 出口阶段：后段处理
+    // 这是模型在跑完几十层 Transformer Block 之后，准备吐出结果前的最后加工。
+    // output_norm 和 output_norm_b：对最后一层 Transformer 的输出进行归一化（类似 tok_norm）。
+    // output 和 output_b：这是最终的“语言模型头”。它把 Transformer 算出来的特征向量，通过一个矩阵乘法（乘以词表大小），转换成对下一个词的概率分布。
+    // output_norm_enc：编码器的输出归一化（主要用于 Encoder-Decoder 模型，如 T5、BART）。
     struct ggml_tensor * output_norm     = nullptr;
     struct ggml_tensor * output_res_score = nullptr; // kimi-k3: final cross-layer residual mix
     struct ggml_tensor * output_norm_b   = nullptr;
@@ -663,6 +677,9 @@ struct llama_model {
     struct ggml_tensor * cls_out_b = nullptr;
     struct ggml_tensor * cls_norm  = nullptr;
 
+    // 卷积层参数（主要用于语音模型或特定架构）
+    // conv1d 和 conv1d_b：一维卷积层的权重和偏置。
+    // 这在传统的 Transformer 架构中不常见，但在某些语音模型（如 Whisper 的早期版本）或混合架构中会用到。
     struct ggml_tensor * conv1d   = nullptr;
     struct ggml_tensor * conv1d_b = nullptr;
 
@@ -696,6 +713,8 @@ struct llama_model {
     // unified vector to store target-model extracted layer ids in eagle3, dflash, etc.
     std::vector<int32_t> target_layer_ids;
 
+    // 这是模型的主体。它是一个数组，存储了模型所有的 Transformer 层（比如 Llama-2-7b 有 32 层，70b 有 80 层）。
+    // 每一层都包含了注意力机制和前馈网络（FFN）的所有权重。
     std::vector<llama_layer> layers;
 
     //Dense linear projections for SentenceTransformers models like embeddinggemma
@@ -720,6 +739,7 @@ struct llama_model {
     // statically allocated context for assigning
     struct llama_meta_device_get_split_state_userdata get_split_state_ud;
 
+    // 记录模型的加载时长和启动时间点（单位是微秒）。在控制台看到的 “load time = XXX ms” 就是根据这些参数算出来的。
     int64_t t_load_us  = 0;
     int64_t t_start_us = 0;
 

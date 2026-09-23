@@ -1172,10 +1172,13 @@ struct llama_model::impl {
     impl() = default;
     ~impl() = default;
 
+    // 模型中所有张量（参数）的总个数（例如 7B 模型大约是 70 亿）。
     uint64_t n_elements = 0;
 
+    // 模型所占用的总内存字节数。
     size_t n_bytes = 0;
 
+    // 模型的描述字符串（通常包含模型名称、架构等信息）。
     std::string desc_str;
 
     llama_ftype ftype = LLAMA_FTYPE_ALL_F32;
@@ -1190,15 +1193,18 @@ struct llama_model::impl {
     // contexts where the model tensors metadata is stored as well as the corresponding buffers:
     std::vector<std::pair<ggml_context_ptr, std::vector<ggml_backend_buffer_ptr>>> ctxs_bufs;
 
+    // cpu_buft_list: CPU 相关的缓冲区列表。
     buft_list_t cpu_buft_list;
     // gpu_buft_list: GPU 相关的缓冲区列表（以设备为键）。
     std::map<ggml_backend_dev_t, buft_list_t> gpu_buft_list;
 
+    // layer_dev: 这是一个结构体，用于存储每个模型层（Layer）的设备信息和缓冲区列表。
     struct layer_dev {
         ggml_backend_dev_t dev;
         buft_list_t * buft_list;
     };
 
+    // dev_input: 输入相关的设备信息和缓冲区列表。
     layer_dev dev_input = {};
     // dev_output: 输出相关的设备信息和缓冲区列表。
     layer_dev dev_output = {};
@@ -1206,6 +1212,7 @@ struct llama_model::impl {
     // 记录了模型中间几十个 Transformer 层分别被分配到了哪个设备上（比如设置了 -ngl 30，那么数组前 30 个元素就是 GPU，剩下的就是 CPU）。
     std::vector<layer_dev> dev_layer;
 
+    // has_tensor_overrides: 它记录了程有没有手动干预某些张量的位置或参数（比如强制要求某个本来该在 GPU 上的小零件留在内存里）。
     bool has_tensor_overrides;
 
     std::vector<float> tensor_split_owned;

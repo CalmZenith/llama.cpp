@@ -188,10 +188,11 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
         // build list of available devices
         std::vector<llama_device> gpus;
         std::vector<llama_device> igpus;
-        std::vector<llama_device> rpc_servers;
+        std::vector<llama_device> rpc_servers;  // 存放远程计算服务器
 
         if (params.split_mode == LLAMA_SPLIT_MODE_TENSOR) {
-            std::vector<ggml_backend_dev_t> devs;
+            // 自动选择模式
+            std::vector<ggml_backend_dev_t> devs;  // 存放独立显卡
             devs.reserve(ggml_backend_dev_count());
             for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
                 auto * dev = ggml_backend_dev_get(i);
@@ -291,6 +292,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
         if (params.main_gpu < 0) {
             model->devices.clear();
         } else {
+            // 检查 main_gpu 是否越界
             if (params.main_gpu >= (int)model->devices.size()) {
                 LLAMA_LOG_ERROR("%s: invalid value for main_gpu: %d (available devices: %zu)\n", __func__, params.main_gpu, model->devices.size());
                 return false;
@@ -301,6 +303,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
         }
     }
 
+    // 在正式加载模型前，把最终选定的硬件设备信息打印到终端日志中，方便用户确认模型跑在哪个显卡上，以及显存够不够。
     for (const auto & dev : model->devices) {
         ggml_backend_dev_props props;
         ggml_backend_dev_get_props(dev.dev, &props);
@@ -317,6 +320,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
 static std::pair<int, llama_model *> llama_model_load(struct gguf_context * metadata, llama_model_set_tensor_data_t set_tensor_data, void * set_tensor_data_ud,
         const std::string & fname, std::vector<std::string> & splits, FILE * file, llama_model_params & params) {
     try {
+        // 创建一个 llama_model_loader 实例，它负责打开 .gguf 文件，解析元数据，并准备加载模型数据。
         llama_model_loader ml(metadata, set_tensor_data, set_tensor_data_ud, fname, splits, file, params.load_mode,
             params.check_tensors, params.no_alloc, params.load_mtp, params.kv_overrides, params.tensor_buft_overrides);
 
@@ -338,6 +342,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
         // loading time will be recalculated after the first eval, so
         // we take page faults deferred by mmap() into consideration
         model->t_load_us = 0;
+        // 启动一个计时器 tm，程序最后会用它来计算加载到底花了多少微秒。
         time_meas tm(model->t_load_us);
 
         model->t_start_us = tm.t_start_us;
@@ -346,7 +351,7 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
         model->hparams.no_alloc   = params.no_alloc;
 
         try {
-            model->load_hparams(ml);
+            model->load_hparams(ml);  // 加载模型超参数
         } catch(const std::exception & e) {
             throw std::runtime_error("error loading model hyperparameters: " + std::string(e.what()));
         }
@@ -354,19 +359,21 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
             throw std::runtime_error("CLIP cannot be used as main model, use it with --mmproj instead");
         }
         try {
-            model->load_vocab(ml);
+            model->load_vocab(ml);  // 加载模型词表
         } catch(const std::exception & e) {
             throw std::runtime_error("error loading model vocabulary: " + std::string(e.what()));
         }
 
-        model->load_stats(ml);
+        model->load_stats(ml);  // 加载模型统计信息
         model->print_info();
 
+        // 只加载词表不推理
         if (params.vocab_only) {
             LLAMA_LOG_INFO("%s: vocab only - skipping tensors\n", __func__);
             return {0, model_ptr.release()};
         }
 
+        // 加载模型权重
         if (!model->load_tensors(ml)) {
             return {-2, nullptr};
         }
@@ -404,11 +411,14 @@ static struct llama_model * llama_model_load_from_file_impl(
     }
     ggml_time_init();
 
+    // 如果不是“只加载词表”模式（!params.vocab_only），
+    // 则必须确保至少有一个 GGML 后端（如 CUDA, Metal, Vulkan 等）已加载。如果没有后端，代码将无法分配计算资源，因此直接返回错误。
     if (!params.vocab_only && ggml_backend_reg_count() == 0) {
         LLAMA_LOG_ERROR("%s: no backends are loaded. hint: use ggml_backend_load() or ggml_backend_load_all() to load a backend before calling this function\n", __func__);
         return nullptr;
     }
 
+    // 进度管理
     unsigned cur_percentage = 0;
     if (params.progress_callback == NULL) {
         params.progress_callback_user_data = &cur_percentage;
@@ -426,6 +436,7 @@ static struct llama_model * llama_model_load_from_file_impl(
         };
     }
 
+    // 加载模型
     const auto [status, model] = llama_model_load(metadata, set_tensor_data, set_tensor_data_ud, path_model, splits, file, params);
     // 0: 加载成功，一切正常
     // -1: 加载失败，通常是文件找不到、格式错误或显存不足
@@ -454,7 +465,7 @@ struct llama_model * llama_model_init_from_user(
         struct llama_model_params params) {
     GGML_ASSERT(metadata != nullptr);
     std::string path_model;
-    std::vector<std::string> splits = {};
+    std::vector<std::string> splits = {};  // 大模型文件本身在硬盘上的拆分
     params.load_mode = LLAMA_LOAD_MODE_NONE;
     params.use_extra_bufts = false;
     return llama_model_load_from_file_impl(metadata, set_tensor_data, set_tensor_data_ud, path_model, splits, /*file*/ nullptr, params);

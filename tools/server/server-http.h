@@ -46,6 +46,7 @@ struct uploaded_file {
     std::string content_type;
 };
 
+// 请求
 struct server_http_req {
     std::map<std::string, std::string> params; // path_params + query_params
     std::map<std::string, std::string> headers; // used by MCP proxy

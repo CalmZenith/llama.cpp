@@ -31,6 +31,7 @@ int main(int argc, char ** argv) {
     }
 
     // number of parallel batches
+    // [P1] API entry / params / runtime bootstrap.
     int n_parallel = params.n_parallel;
 
     // total length of the sequences including the prompt
@@ -117,6 +118,7 @@ int main(int argc, char ** argv) {
 
     // create a llama_batch
     // we use this object to submit token data for decoding
+    // [P2] Batch semantics / decode orchestration entry.
     llama_batch batch = llama_batch_init(std::max(tokens_list.size(), (size_t) n_parallel), 0, n_parallel);
 
     std::vector<llama_seq_id> seq_ids(n_parallel, 0);
@@ -166,6 +168,7 @@ int main(int argc, char ** argv) {
     // main loop
 
     // we will store the parallel decoded sequences in this vector
+    // [P2] Generation loop.
     std::vector<std::string> streams(n_parallel);
 
     // remember the batch index of the last token for each parallel sequence

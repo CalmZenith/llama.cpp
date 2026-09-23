@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// 字符范围和属性表
 const std::initializer_list<std::pair<uint32_t, uint16_t>> unicode_ranges_flags = {  // start, flags // last=next_start-1
 {0x000000, 0x0080},
 {0x000020, 0x0008},

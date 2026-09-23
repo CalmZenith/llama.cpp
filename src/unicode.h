@@ -42,9 +42,11 @@ struct unicode_cpt_flags {
 
     // decode from uint16
     inline unicode_cpt_flags(const uint16_t flags = 0) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__  // 小端序
+        // 直接把整数“倒”进结构体里
+        // 不管 this 是什么复杂的位域结构体了，把它所在的这块内存地址，看成是一个普通的 uint16_t（2 字节整数）的地址
         *reinterpret_cast<uint16_t*>(this) = flags;
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__  // 大端序
         is_undefined   = (flags & UNDEFINED)   ? 1 : 0;
         is_number      = (flags & NUMBER)      ? 1 : 0;
         is_letter      = (flags & LETTER)      ? 1 : 0;
@@ -64,6 +66,7 @@ struct unicode_cpt_flags {
 
     inline uint16_t as_uint() const {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        // 直接把这 2 字节内存里的内容，当作一个 uint16_t 整数返回。
         return *reinterpret_cast<const uint16_t*>(this);
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
         uint16_t result =
@@ -87,6 +90,7 @@ struct unicode_cpt_flags {
 #endif
     }
 
+    // 保留核心类别，清零辅助位
     inline uint16_t category_flag() const {
         return this->as_uint() & MASK_CATEGORIES;
     }

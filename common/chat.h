@@ -133,6 +133,8 @@ struct common_chat_msg_diff {
     size_t                tool_call_index = std::string::npos;  // 工具调用索引
     common_chat_tool_call tool_call_delta;  // 工具调用增量
 
+    // 核心逻辑：把新旧两条消息对比一下，看看多了哪几个字符，或者工具调用的参数多了哪几位。
+    // 输出：一个包含所有“变化点”的向量
     static std::vector<common_chat_msg_diff> compute_diffs(const common_chat_msg & msg_prv,
                                                            const common_chat_msg & msg_new);
 
@@ -285,8 +287,8 @@ struct common_chat_params {
 // per-message parsing syntax
 // should be derived from common_chat_params
 struct common_chat_parser_params {
-    common_chat_format      format               = COMMON_CHAT_FORMAT_CONTENT_ONLY;
-    common_reasoning_format reasoning_format     = COMMON_REASONING_FORMAT_NONE; // TODO: refactor this to "bool parse_reasoning"
+    common_chat_format      format               = COMMON_CHAT_FORMAT_CONTENT_ONLY;  // 格式类型
+    common_reasoning_format reasoning_format     = COMMON_REASONING_FORMAT_NONE;  // 思考格式
     // Whether reasoning_content should be inlined in the content (e.g. for reasoning_format=deepseek in stream mode)
     bool                    reasoning_in_content = false;  // 思考内容是否混入正文
     std::string             generation_prompt;

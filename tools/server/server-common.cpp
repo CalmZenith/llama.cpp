@@ -997,7 +997,7 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
         // array of tokens
         llama_tokens tmp = json_prompt.get<llama_tokens>();
         return server_tokens(tmp, false);
-    } else if (json_prompt.contains(JSON_STRING_PROMPT_KEY)) {
+    } else if (json_prompt.contains(JSON_STRING_PROMPT_KEY)) {  // 情况 3: 原生 JSON 对象包装格式（如 {"prompt_string": "...", ...}）
         // JSON object with prompt key.
         // 情况 3.1: 包含多模态数据（图片等）
         if (json_prompt.contains(JSON_MTMD_DATA_KEY)) {
@@ -1011,6 +1011,7 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
             }
             return process_mtmd_prompt(mctx, json_prompt.at(JSON_STRING_PROMPT_KEY), files, init_opt);
         } else {
+            // 情况 3.2: 仅仅是用对象包装了一下纯文本，没有多模态内容
             // Not multimodal, but contains a subobject.
             llama_tokens tmp = tokenize_mixed(vocab, json_prompt.at(JSON_STRING_PROMPT_KEY), add_special, parse_special);
             return server_tokens(tmp, false);
@@ -1020,6 +1021,8 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
    }
 }
 
+// 将输入 prompt（可能是字符串、Token 列表、混合列表或带多模态数据的对象）转换为 llama_tokens
+// 并返回一个 vector，以便支持后续的 batched prompt
 std::vector<server_tokens> tokenize_input_prompts(const llama_vocab * vocab, mtmd_context * mctx, const json & json_prompt, bool add_special, bool parse_special, const mtmd_helper_init_opt & init_opt) {
     std::vector<server_tokens> result;  // 存储最终的 token 结果
     // 如果 prompt 是数组且不包含纯数字（即可能是混合类型或多模态）

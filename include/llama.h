@@ -99,6 +99,7 @@ extern "C" {
         LLAMA_TOKEN_TYPE_BYTE         = 6,
     };
 
+    // 这一意味着一个 token 可以有多个身份
     enum llama_token_attr {
         LLAMA_TOKEN_ATTR_UNDEFINED    = 0,  // 默认
         LLAMA_TOKEN_ATTR_UNKNOWN      = 1 << 0,  // 未知
@@ -333,6 +334,8 @@ extern "C" {
         ggml_backend_buffer_type_t buft;
     };
 
+    // 定义了加载大模型时的静态物理环境配置，负责 “怎么把模型从硬盘读到内存/显存里”
+    // 关注点：GPU 几层 (n_gpu_layers)、主 GPU 是哪个、是否使用内存映射 (use_mmap)、是否分层加载。
     struct llama_model_params {
         // NULL-terminated list of devices to use for offloading (if NULL, all available devices are used)
         // 控制具体使用哪些张量计算设备，是个双重数组（可以指定使用第几个），NULL默认有多少用多少
@@ -341,6 +344,7 @@ extern "C" {
         // NULL-terminated list of buffer types to use for tensors that match a pattern
         const struct llama_model_tensor_buft_override * tensor_buft_overrides;
 
+        // 将模型的多少层放到GPU里算，0代表完全放在CPU，-1（或者一个很大的数）代表全部放在GPU，也是命令行-ngl传进来的参数
         int32_t n_gpu_layers; // number of layers to store in VRAM, a negative value means all layers
         // 多卡并行模式。针对拥有多张 GPU 的服务器，定义一张卡装不下时怎么切分模型。
         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
@@ -404,6 +408,9 @@ extern "C" {
         int32_t  n_threads_batch;       // number of threads to use for batch processing
 
         enum llama_context_type      ctx_type;          // set the context type (e.g. MTP)
+        // RoPE 缩放类型，用于处理长上下文。0 表示使用模型默认设置。作用：为了让模型处理 超出其原始训练长度 的文本。
+        // 通俗解释：原本模型只能读 2000 字，通过“缩放”，我们可以把 8000 字的信息“挤”进模型原本的感受野里。
+        // 就像把尺子上的刻度画得更密，从而在同样长的尺子上量出更多的数值。
         enum llama_rope_scaling_type rope_scaling_type; // RoPE scaling type, from `enum llama_rope_scaling_type`
         // 词嵌入池化类型，决定如何将多个词的向量合并成一个表示。0 表示使用模型默认设置。
         // 通俗解释：模型算完后，每个字都有一个向量。pooling 决定了怎么把这几千个字的向量合成一个代表全篇意义的向量。
@@ -434,10 +441,12 @@ extern "C" {
         // 触发 KV 缓存碎片整理的阈值，如果缓存中的碎片数量超过这个值，就会触发整理，已过时
         float    defrag_thold;     // [DEPRECATED] defragment the KV cache if holes/size > thold, <= 0 disabled (default)
 
+        // 评估回调函数，在 llama_decode 每次计算完一个 Token 后被调用，可以在终端看到进度条
         ggml_backend_sched_eval_callback cb_eval;
         // 评估回调函数的上下文数据，通常用来传递一些额外的信息给回调函数
         void * cb_eval_user_data;
 
+        // 决定用什么精度（数据类型）来存储 KV Cache（KV 缓存）。
         enum ggml_type type_k; // data type for K cache [EXPERIMENTAL]
         enum ggml_type type_v; // data type for V cache [EXPERIMENTAL]
 
@@ -452,6 +461,7 @@ extern "C" {
         bool embeddings;  // if true, extract embeddings (together with logits)
         // 显存卸载，决定是否把注意力机制中最核心的 K（键）、Q（查询）、V（值） 运算以及它们的缓存全部扔给 GPU 处理。
         bool offload_kqv; // offload the KQV ops (including the KV cache) to GPU
+        // 禁用性能统计，设为 true 后，程序不再统计每一层算了多少毫秒，可以稍微减少一点后台开销。
         bool no_perf;     // measure performance timings
         // 卸载主机张量操作，把一些原本在内存里跑的简单数学运算（比如加减乘除）也搬到 GPU 上去算。
         bool op_offload;  // offload host tensor operations to device

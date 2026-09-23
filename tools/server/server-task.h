@@ -107,7 +107,10 @@ struct task_result_state {
     // tracking diffs for partial tool calls
     // 记录每次生成中“变化量”的列表。
     std::vector<common_chat_msg_diff> diffs;
-    common_chat_parser_params chat_parser_params;
+    // 为了生成增量数据，我们需要保存一些“基准状态”。
+    // 比如，在处理完第一块思考内容后，我们需要保存它，这样下一块进来时，才能知道从哪里开始找不同。
+    // 所以这里存一份完整的工具调用参数和消息数据。
+    common_chat_parser_params chat_parser_params;  // 解析规则
     common_chat_msg chat_msg;  // 记录了从生成开始到上一秒钟，模型说过的所有话（包括思考内容和工具调用的完整参数）。
     std::string generated_text;  // 模型生成的内容的原始状态
     std::vector<std::string> generated_tool_call_ids;  // 记录了所有工具调用的 ID。
@@ -115,15 +118,15 @@ struct task_result_state {
 
     // for OpenAI Responses and Anthropic streaming API:
     // track output item / content block state across chunks
-    bool thinking_block_started = false;
-    bool text_block_started = false;
+    bool thinking_block_started = false;  // 模型是不是在思考
+    bool text_block_started = false;  // 模型是不是已经结束思考，开始回答
 
     // for OpenAI Responses streaming API
     bool oai_resp_created = false;
     const std::string oai_resp_id;  // 响应总 id
     const std::string oai_resp_reasoning_id;  // 思维链 id
     const std::string oai_resp_message_id;  // 消息 id
-    std::string oai_resp_fc_id; // function call ID for current args delta
+    std::string oai_resp_fc_id;  // 工具调用 id
 
     task_result_state(const common_chat_parser_params & chat_parser_params);
 
@@ -271,11 +274,11 @@ struct result_prompt_progress {
 };
 
 struct server_task_result {
-    int id           = -1;
-    int id_slot      = -1;
+    int id           = -1;  // 属于哪个 task
+    int id_slot      = -1;  // 属于哪个 slot
 
     // TODO @ngxson : remove this field and implement a mapping task_id -> idx in the response_reader
-    size_t index = 0; // to be used for batched tasks
+    size_t index = 0;  // to be used for batched tasks 用于批量任务中对号入座
 
     virtual bool is_error() {
         // only used by server_task_result_error
@@ -566,7 +569,7 @@ struct server_task_result_apply_lora : server_task_result {
 };
 
 struct server_prompt {
-    server_tokens tokens;
+    server_tokens tokens;  // 存的是 token id
 
     std::list<common_prompt_checkpoint> checkpoints;
 

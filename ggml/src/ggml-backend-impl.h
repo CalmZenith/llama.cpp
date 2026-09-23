@@ -220,7 +220,7 @@ extern "C" {
     struct ggml_backend_device {
         struct ggml_backend_device_i iface;  // 设备接口
         ggml_backend_reg_t reg;  // 注册表信息
-        void * context;
+        void * context;  // 上下文
     };
 
     //

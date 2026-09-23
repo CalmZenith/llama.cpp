@@ -389,6 +389,7 @@ extern "C" {
     enum ggml_type {
         GGML_TYPE_F32     = 0,  // 32位浮点数
         GGML_TYPE_F16     = 1,
+        // 以Q开头的类型是量化类型，是llama.cpp能够跑在手机和普通电脑上的原因。它们将原本16/32位的数据压缩到4位甚至2位。
         GGML_TYPE_Q4_0    = 2,
         GGML_TYPE_Q4_1    = 3,
         // GGML_TYPE_Q4_2 = 4, support has been removed
@@ -687,6 +688,7 @@ extern "C" {
 
         struct ggml_backend_buffer * buffer;
 
+        // 张量的形状，比如 ne[0]=4096, ne[1]=32 表示这是一个 4096x32 的矩阵，最高支持4维张量
         int64_t ne[GGML_MAX_DIMS]; // number of elements
         // 步长。表示在内存中移动到下一个维度需要跨越多少字节。这在处理内存对齐和非连续内存块（比如“视图 view”）时至关重要。
         size_t  nb[GGML_MAX_DIMS]; // stride in bytes:
@@ -704,20 +706,25 @@ extern "C" {
         // op params - allocated as int32_t for alignment
         int32_t op_params[GGML_MAX_OP_PARAMS / sizeof(int32_t)];
 
+        // 标志位，比如 GGML_TENSOR_FLAG_INPUT 表示这是一个输入张量，GGML_TENSOR_FLAG_OUTPUT 表示这是一个输出张量。
         int32_t flags;
 
+        // 指向参与计算的“前体”张量。比如 C = A * B，那么 C 的 src[0] 是 A，src[1] 是 B。通过这些指针，GGML 能构建出一张巨大的“计算图”。
         struct ggml_tensor * src[GGML_MAX_SRC];
 
         // source tensor and offset for views
         struct ggml_tensor * view_src;
         size_t               view_offs;
 
+        // 张量在内存/显存里的绝对起始地址。
         void * data;
 
+        // 张量的名称
         char name[GGML_MAX_NAME];
 
         void * extra; // extra things e.g. for ggml-cuda.cu
 
+        // 占位符，用于保证结构体的大小是 8 或 16 的倍数（内存对齐）。
         char padding[8];
     };
 

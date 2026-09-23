@@ -41,6 +41,8 @@ struct llama_model_loader {
         // 数据在文件中的偏移量：它记录了该张量的原始二进制数据从文件的第几个字节开始。
         size_t   offs; // tensor data offset in the original file
 
+        // 指向内存中张量对象的指针：这是在 GGML 计算图中代表该权重的对象。
+        // 虽然这个结构体被创建时，数据可能还没读进内存，但这个指针已经指向了描述该权重形状（Shape）、类型（Type）的 ggml_tensor 结构。
         ggml_tensor * tensor;
 
         llama_tensor_weight(const llama_file * file, uint16_t idx, const struct gguf_context * gguf_ctx, ggml_tensor * tensor) : idx(idx), tensor(tensor) {
@@ -50,6 +52,10 @@ struct llama_model_loader {
                 throw std::runtime_error(format("tensor '%s' not found in the model", ggml_get_name(tensor)));
             }
 
+            // 计算偏移量：
+            // gguf_get_data_offset(gguf_ctx)：获取 GGUF 文件中所有张量数据块的起始位置（跳过文件头和 KV 键值对后的位置）。
+            // gguf_get_tensor_offset(gguf_ctx, tensor_idx)：获取该特定张量在数据块中的相对偏移。
+            // 两者相加，就是该张量在整个 .gguf 文件中的绝对起始偏移量。
             offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
             if (offs + ggml_nbytes(tensor) < offs || offs + ggml_nbytes(tensor) > file->size()) {
                 throw std::runtime_error(format("tensor '%s' data is not within the file bounds, model is corrupted or incomplete", ggml_get_name(tensor)));
@@ -77,6 +83,7 @@ struct llama_model_loader {
         }
     };
 
+    // 非必需张量。如果文件中缺少该张量，加载器不会报错。
     static const int TENSOR_NOT_REQUIRED    = 1 << 0;
     // 重复张量。标记该张量的数据可能被多个对象共享，在内存分配时需要特殊处理。
     static const int TENSOR_DUPLICATED      = 1 << 1;
@@ -86,16 +93,19 @@ struct llama_model_loader {
     static const int TENSOR_ALLOW_RESHAPE   = 1 << 4;
     static const int TENSOR_READ_LAZY       = 1 << 5; // read rows on demand instead of loading whole tensor; requires mmap for now
 
+    // 模型的 KV 键值对数量。
     int n_kv      = 0;
     // 模型中的张量总数。
     int n_tensors = 0;
     // 已经在内存中成功创建的张量数量。
     int n_created = 0;
 
+    // 模型中所有张量（参数）的总元素数量。
     uint64_t n_elements = 0;
     // 模型中所有张量的总字节数。
     size_t   n_bytes    = 0;
 
+    // 是否使用内存映射（mmap）来加载模型。
     bool use_mmap = false;
     // 是否使用直接 I/O（Direct I/O）来读取文件。
     bool use_direct_io = false;
@@ -138,20 +148,24 @@ struct llama_model_loader {
         std::set<std::string>                  tensors;
     } lazy;
 
+    // 模型文件列表，管理由于过大而被切分成多个分片的 .gguf 文件。
     llama_files files;
     // 模型文件类型，例如 F16, Q4_K_M 等，代表了模型的压缩/量化级别。
     llama_ftype ftype;
     // 模型文件版本，GGUF 的版本号，如 v3。
     llama_fver  fver;
 
+    // 一个维护所有 mmap 映射关系的列表，用于在模型销毁时释放资源。
     llama_mmaps mappings;
 
+    // 权重名称到 llama_tensor_weight 映射，使用自定义比较器按层排序。
     std::map<std::string, llama_tensor_weight, weight_name_comparer> weights_map;
     // KV 键值对覆盖。用户可以在启动时手动指定一些参数，这些手动设置的值会存放在这里，加载时会优先使用它们，而不是文件里自带的值
     std::unordered_map<std::string, llama_model_kv_override> kv_overrides;
     // 张量缓冲区覆盖。允许用户在启动时指定某些张量使用特定的缓冲区类型（例如，强制使用 GPU 缓冲区而不是 CPU 缓冲区）。
     const llama_model_tensor_buft_override * tensor_buft_overrides;
 
+    // GGUF 文件的元数据上下文。
     gguf_context_ptr metadata_ptr;
     struct gguf_context * metadata; // either metadata_ptr.get() or externally set
     llama_model_set_tensor_data_t set_tensor_data;
@@ -159,10 +173,14 @@ struct llama_model_loader {
     // GGUF 文件中的张量数据上下文。
     std::vector<ggml_context_ptr> contexts;
 
+    // 模型架构名称。
     std::string arch_name;
     // 一个辅助对象，用于根据模型的架构快速读取对应的元数据键值。
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
+    // size_data 是总共要加载的数据量
+    // size_done 是当前已经加载完成的数据量。它们配合起来用于显示加载进度条（xx%）。
+    // 已使用的内存映射区间，记录了哪些文件片段已经被映射到了内存地址空间中。
     size_t size_done = 0;
     size_t size_data = 0;
     std::vector<std::pair<size_t, size_t>> mmaps_used;

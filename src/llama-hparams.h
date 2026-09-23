@@ -41,7 +41,7 @@ enum llm_ffn_op_type : int;
 
 struct llama_hparams_posnet {
     uint32_t n_embd;
-    uint32_t n_layer;
+    uint32_t n_layer;  // 模型的层数
 };
 
 struct llama_hparams_convnext {
@@ -63,8 +63,9 @@ struct llama_hparams {
     bool norm_before_residual = false;
     bool norm_before_fc       = false;
 
+    // 基础维度相关
     uint32_t n_ctx_train;  // context size the model was trained on 训练上下文
-    uint32_t n_embd;
+    uint32_t n_embd;  // 嵌入向量维度
     uint32_t n_layer_all;
     uint32_t n_layer_nextn = 0;
 
@@ -99,8 +100,10 @@ struct llama_hparams {
     struct llama_hparams_posnet   posnet;
     struct llama_hparams_convnext convnext;
 
+    // 专门为 Mamba 或 RWKV-6/7 等非 Transformer 架构准备的参数
     uint32_t n_shortconv_l_cache  = 0;
 
+    // 存储每一层的头数和键值头数
     std::array<uint32_t, LLAMA_MAX_LAYERS> n_head_arr;
     std::array<uint32_t, LLAMA_MAX_LAYERS> n_head_kv_arr;
     std::array<uint32_t, LLAMA_MAX_LAYERS> n_ff_arr;
@@ -110,12 +113,17 @@ struct llama_hparams {
     // per-layer top-k expert routing count
     std::array<uint32_t, LLAMA_MAX_LAYERS> n_expert_used_arr;
 
+    // 在一些 MoE（混合专家）模型中，并不是所有层都是专家层。
+    // 有些模型前几层是普通的稠密层。这个值定义了模型最开始有多少层是纯稠密的。
     uint32_t n_layer_dense_lead = 0;
     // deepseek 专用，MLA 将 Q, K, V 压缩进一个低秩的潜在空间。
     // 这两个值分别代表了 Q 和 KV 压缩后的秩（维度）。通过这种低秩分解技术，可以用小代价还原出全量的注意力。
     uint32_t n_lora_q           = 0;
     uint32_t n_lora_kv          = 0;
-    uint32_t n_ff_shexp         = 0;  // 共享专家隐层维度
+    // 专家系统进阶，DeepSeek 的专家系统比一般的 Mixtral 复杂得多。
+    // 不同的专家角色维度。exp 是常规路由专家，
+    // shexp 是 Shared Expert（共享专家），chexp 则是 Coupled/Condensed Expert（耦合专家）。
+    uint32_t n_ff_shexp         = 0;  // 常规路由专家隐层维度
     uint32_t n_ff_chexp         = 0;  // 耦合专家隐层维度
     // 共享专家（Shared Experts）：
     //    普通的 MoE 每层都有自己独立的专家组。而 DeepSeek 引入了“共享专家”的概念。
@@ -135,6 +143,7 @@ struct llama_hparams {
     uint32_t n_embd_head_k_mla_swa   = 0;
     uint32_t n_embd_head_v_mla_swa   = 0;
 
+    // MoE 路由缩放相关
     float    expert_group_scale   = 0.05f;  // 专家组缩放
     float    expert_weights_scale = 0.0f;  // 专家权重缩放
     bool     expert_weights_norm  = false;  // 专家权重归一化开关
@@ -144,10 +153,15 @@ struct llama_hparams {
     uint32_t moe_every_n_layers   = 0;  // 每隔多少层使用 MoE，如果这个值是 2，意味着：一层 Dense，一层 MoE
     uint32_t moe_latent_size      = 0;
 
+    // 归一化的防止除 0 加的小常数
     float f_norm_eps;  // 用于标准的 LayerNorm
     float f_norm_rms_eps;  // 用于 RMSNorm
     float f_norm_group_eps;  // 用于 GroupNorm
 
+    // 软截断 Soft-Capping，在模型计算中，Logits（逻辑值） 是经过矩阵乘法算出来的“生原始分”。
+    // 如果这个分值太大（比如 1000），经过 Softmax 后会变成极其悬殊的概率分布，导致计算不稳定。
+    // 以前大家用 Hard Clipping（强行把超过 50 的数变成 50），但这样太暴力，会让导数断掉。
+    // 现在用一个平滑的函数（通常是 tanh）把值限制在一定范围内。
     float f_attn_logit_softcapping   = 50.0f;  // 注意力的软截断，发生在计算 Q·K 之后，做 Softmax 之前。
     float f_router_logit_softcapping = 30.0f;  // MoE 路由得分的软截断，发生在 MoE 选专家的时候。
     float f_final_logit_softcapping  = 30.0f;  // 最终输出 Logits 的软截断，模型最后一层输出最终词表概率之前。
@@ -163,6 +177,7 @@ struct llama_hparams {
     uint32_t n_lora_value_res_mix   = 0;
     uint32_t n_lora_gate            = 0;
 
+    // RoPE 缩放参数
     float    rope_attn_factor = 1.0f;  // 训练时的注意力缩放因子
     float    rope_freq_base_train;  // 训练时的基础频率
     float    rope_freq_base_train_swa  = 10000.0f;  // SWA 时的基础频率，SWA 代表滑动窗口注意力
@@ -170,6 +185,7 @@ struct llama_hparams {
     float    rope_freq_scale_train_swa = 1.0f;  // SWA 时的频率缩放因子，线性
     float    rope_scaling_alpha        = 0.0f;  // NTK-aware alpha for XDRoPE
 
+    // YARN 缩放参数
     uint32_t n_ctx_orig_yarn;  // 原始训练长度
     float    rope_yarn_log_mul = 0.0f;  // 对数乘法因子，用于对旋转频率进行对数空间下的微调，进一步平滑位置感
 
@@ -229,8 +245,10 @@ struct llama_hparams {
     uint32_t n_hrm_l_cycles = 0;
     bool     hrm_prefix_lm = false;
 
+    // 为 Mamba 准备，SSM 归一化开关
     bool ssm_dt_b_c_rms = false;
 
+    // 为 Mamba 准备
     float f_clamp_kqv      = 0.0f;  // 硬截断，KQV 强行截断
     float f_max_alibi_bias = 0.0f;  // ALiBi 偏置上限
     float f_logit_scale    = 0.0f;  // Logits 缩放因子
@@ -262,6 +280,9 @@ struct llama_hparams {
     uint32_t n_embd_inp_enc_impl = 0;
 
     // output embedding dimension (0 = use n_embd)
+    // output embedding dimension (0 = use n_embd，即中间是多少维，输出就是多少维)
+    // 模型的中间向量是 4096 维，输出到词表预测下一个词时，直接用 4096 维数组去乘词表矩阵。
+    // 有些模型在最后输出前，会做一个 “瓶颈压缩”或“扩张”（比如把 4096 压缩成 1024 维，再送给词表）。
     uint32_t n_embd_out_impl = 0;
 
     uint32_t dflash_block_size       = 0;
@@ -416,6 +437,7 @@ struct llama_hparams {
     // whether or not the given layer is recurrent (for hybrid models)
     bool is_recr(uint32_t il) const;
 
+    // il = Index of Layer（层索引）
     uint32_t n_head(uint32_t il = 0) const;
 
     uint32_t n_head_kv(uint32_t il = 0) const;
@@ -429,6 +451,7 @@ struct llama_hparams {
     // return the maximum n_expert_used across all layers
     uint32_t n_expert_used_max() const;
 
+    // GQA (Grouped-Query Attention，分组查询注意力)
     uint32_t n_gqa(uint32_t il = 0) const;
 
     uint32_t n_rot(uint32_t il = 0) const;

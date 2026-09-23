@@ -11,6 +11,7 @@ static void print_usage(int, char ** argv) {
     printf("\n");
 }
 
+// 测试
 int main(int argc, char ** argv) {
     std::setlocale(LC_NUMERIC, "C");
 
@@ -82,6 +83,11 @@ int main(int argc, char ** argv) {
 
     // load dynamic backends
 
+    // 解析命令行参数
+    // 在 llama.cpp 和它底层的 ggml 张量计算库中，backends（后端）指的是“专门用于执行矩阵计算的底层硬件加速引擎”。
+    // 简单来说：不管大模型多复杂，本质上都是海量的矩阵乘法。
+    // 由于每个人的电脑硬件不同，有的有 NVIDIA 独立显卡，有的是苹果 M 系列芯片，有的是纯靠 CPU 算，
+    // 所以程序需要不同的“底层驱动”去指挥这些不同的硬件干活，这些驱动在这里统称为 backends。
     ggml_backend_load_all();
 
     // initialize the model
@@ -96,6 +102,7 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    // 这两行代码的核心作用是：获取模型的词表，并计算出一段文本（prompt）会被拆解成多少个 Token。
     const llama_vocab * vocab = llama_model_get_vocab(model);
     // tokenize the prompt
 
@@ -137,6 +144,7 @@ int main(int argc, char ** argv) {
     // 启用性能计数器
     ctx_params.no_perf = false;
 
+    // 核心：基于加载好的模型和参数，创建一个具体的“运行环境”（Context）。
     llama_context * ctx = llama_init_from_model(model, ctx_params);
 
     if (ctx == NULL) {
@@ -170,6 +178,10 @@ int main(int argc, char ** argv) {
 
     llama_batch batch = llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
 
+    // 大部分我们熟悉的模型（比如 Llama, Qwen, GPT）都是 “只有解码器（Decoder-only）” 的架构。它们直接从你的第一句话往后接龙。
+    // 但有些模型（比如 T5, Whisper, BART）有两个大脑：
+    // 编码器（Encoder）：负责“理解”你输入的整段话。
+    // 解码器（Decoder）：负责根据理解的内容，从零开始“写”出回答。
     if (llama_model_has_encoder(model)) {
         // 程序把你的 Prompt 整块丢给 Encoder。这个大脑会把你的文字转化成一组复杂的数学特征（隐藏状态），存放在模型内部。
         if (llama_encode(ctx, batch)) {
@@ -177,12 +189,15 @@ int main(int argc, char ** argv) {
             return 1;
         }
 
+        // 找到 Decoder 的“启动信号”。
+        // 对于 Llama 这种模型，这个信号通常就是 BOS（Beginning of Sequence）Token。
         llama_token decoder_start_token_id = llama_model_decoder_start_token(model);
         //  如果模型没有启动信号，程序就默认用 BOS (Beginning of Sentence，句子开头) 标记（通常是 <s>）。
         if (decoder_start_token_id == LLAMA_TOKEN_NULL) {
             decoder_start_token_id = llama_vocab_bos(vocab);
         }
 
+        // 准备一个只包含启动信号的新 Batch。这是 Decoder 开始“说话”的起点。
         batch = llama_batch_get_one(&decoder_start_token_id, 1);
     }
 
@@ -192,6 +207,11 @@ int main(int argc, char ** argv) {
     int n_decode = 0;  // 记录生成的 token 数量
     llama_token new_token_id;  // 存储新生成的 token ID
 
+    // 循环条件：只要当前处理的位置加上 Batch 大小，还没达到“预估长度”（Prompt长度 + 想要生成的长度），就继续。
+    // n_pos: 当前处理到的位置（从 0 开始计数）。
+    // batch.n_tokens：当前这批要处理的单词数。第一次循环：它是你输入的整段 Prompt 的长度。之后每次循环：它只有 1（即刚生成的那个新词）。
+    // n_pos + batch.n_tokens: 加上这批数据后，总共处理到了哪里。
+    // n_prompt + n_predict: 预估的总长度（Prompt长度 + 想要生成的长度）。
     for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
         // evaluate the current batch with the transformer model
         // evaluate the current batch with the transformer model
@@ -201,6 +221,7 @@ int main(int argc, char ** argv) {
             return 1;
         }
 
+        // 更新当前处理到的位置
         n_pos += batch.n_tokens;
 
         // sample the next token
@@ -214,6 +235,7 @@ int main(int argc, char ** argv) {
                 break;
             }
 
+            // 将 token 转换回字符并打印
             char buf[128];
             int n = llama_token_to_piece(vocab, new_token_id, buf, sizeof(buf), 0, true);
             if (n < 0) {
@@ -233,8 +255,10 @@ int main(int argc, char ** argv) {
 
     printf("\n");
 
+    // 记录结束时间
     const auto t_main_end = ggml_time_us();
 
+    // 打印生成速度
     fprintf(stderr, "%s: decoded %d tokens in %.2f s, speed: %.2f t/s\n",
             __func__, n_decode, (t_main_end - t_main_start) / 1000000.0f, n_decode / ((t_main_end - t_main_start) / 1000000.0f));
 

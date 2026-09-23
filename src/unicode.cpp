@@ -27,6 +27,7 @@ static std::string unicode_cpts_to_utf8(const std::vector<uint32_t> & cps) {
     return result;
 }
 
+// 根据首字节的“长相”，决定要读几个字节，然后把这些分散的比特拼成一个完整的数字。
 uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
     assert(offset < utf8.size());
     // 如果首字节是 0xxxxxxx（最高位是 0），说明是 1 字节的 ASCII 字符，如字符A
@@ -41,6 +42,7 @@ uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
     }
     // 如果首字节是 110xxxxx（最高位是 110），说明是 2 字节的字符，如字符é
     if (!(utf8[offset + 0] & 0x20)) {
+        // 判断是否越界以及多节字符的二个字节是否合法
         if (offset + 1 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80)) {
             throw std::invalid_argument("invalid character");
         }
@@ -118,6 +120,9 @@ uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
 //    return result;
 //}
 
+// 把 Unicode 规则，打散并扩充成能查表的大数组
+// 这个函数的作用就是初始化一个 cpt_flags 数组然后这个数组会包括所有的字符无论是字母数字还是标点等等，
+// 然后我们挨个对这个数组的元素遍历，设定好它的类别即是 LETTER 还是 NUMBER 等等
 static std::vector<unicode_cpt_flags> unicode_cpt_flags_array() {
     // 初始化一个足够大的数组，默认所有字符都是未定义的
     std::vector<unicode_cpt_flags> cpt_flags(MAX_CODEPOINTS, unicode_cpt_flags::UNDEFINED);
@@ -177,14 +182,17 @@ static std::unordered_map<uint8_t, std::string> unicode_byte_to_utf8_map() {
 
 static std::unordered_map<std::string, uint8_t> unicode_utf8_to_byte_map() {
     std::unordered_map<std::string, uint8_t> map;
+    //  '!' to '~' 直接映射
     for (int ch = 0x21; ch <= 0x7E; ++ch) {  // u'!' to u'~'
         assert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
     }
+    // '¡' to '¬' 直接映射
     for (int ch = 0xA1; ch <= 0xAC; ++ch) {  // u'¡' to u'¬'
         assert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
     }
+    // '®' to 'ÿ' 直接映射
     for (int ch = 0xAE; ch <= 0xFF; ++ch) {  // u'®' to u'ÿ'
         assert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
@@ -199,6 +207,7 @@ static std::unordered_map<std::string, uint8_t> unicode_utf8_to_byte_map() {
     return map;
 }
 
+// 一个示例 bpe_words = {"Hi!", " ", "🙂" }
 static std::vector<std::string> unicode_byte_encoding_process(const std::vector<std::string> & bpe_words) {
     std::vector<std::string> bpe_encoded_words;
     for (const auto & word : bpe_words) {
@@ -243,6 +252,7 @@ static std::vector<size_t> unicode_regex_split_custom_gpt2(const std::string & t
         };
 
         size_t _prev_end = offset_ini;
+        // end 是当前片段的末尾位置
         auto _add_token = [&] (const size_t end) -> size_t {
             assert(_prev_end <= end && end <= offset_end);
             size_t len = end - _prev_end;
@@ -270,6 +280,7 @@ static std::vector<size_t> unicode_regex_split_custom_gpt2(const std::string & t
                     pos += _add_token(pos+2);
                     continue;
                 }
+                // 判断单引号后面的那个字符是否是 r, v, l
                 if (pos+2 < offset_end) {
                     uint32_t cpt_next_next = _get_cpt(pos+2);
                     if ((cpt_next == 'r' && cpt_next_next == 'e') ||
@@ -360,7 +371,7 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
             return (offset_ini <= pos && pos < offset_end) ? unicode_cpt_flags_from_cpt(cpts[pos]) : unicode_cpt_flags{};
         };
 
-        size_t _prev_end = offset_ini;
+        size_t _prev_end = offset_ini;  // _prev_end 永远指向“上一个已经剪好的片段”的末尾，也就是“下一个即将剪开的片段”的起始点
         auto _add_token = [&] (const size_t end) -> size_t {
             assert(_prev_end <= end && end <= offset_end);
             size_t len = end - _prev_end;
@@ -401,11 +412,13 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
 
             // regex: [^\r\n\p{L}\p{N}]?\p{L}+
             if (!(cpt == '\r' || cpt == '\n' || flags.is_number)) {
+                // 如果当前字符是字母，或者下一个字符是字母（比如空格）
                 if (flags.is_letter || _get_flags(pos+1).is_letter) {  // one or more letters
                     pos++;
                     while (_get_flags(pos).is_letter) {
                         pos++;
                     }
+                    // 可能是“空格+单词”，也可能是“纯单词”
                     _add_token(pos);
                     continue;
                 }
@@ -426,14 +439,15 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
 
             // regex: <space>?[^\s\p{L}\p{N}]+[\r\n]*
             auto flags2 = (cpt == ' ' ? _get_flags(pos+1) : flags);
+            // 如果这个字符既不是空格、也不是字母、也不是数字（那它就是标点、符号或特殊字符）。
             if (!(flags2.is_whitespace | flags2.is_letter | flags2.is_number) && flags.as_uint()) {
-                pos += (cpt == ' ');
+                pos += (cpt == ' ');  // 如果开头是空格，吃掉它
                 while (!(flags2.is_whitespace | flags2.is_letter | flags2.is_number) && flags2.as_uint()) {
                     flags2 = _get_flags(++pos);
                 }
                 uint32_t cpt2 = _get_cpt(pos);
                 while (cpt2 == '\r' || cpt2 == '\n') {
-                    cpt2 = _get_cpt(++pos);
+                    cpt2 = _get_cpt(++pos);  // 如果符号后面跟着换行符，也吃掉
                 }
                 _add_token(pos);
                 continue;
@@ -743,6 +757,8 @@ static std::vector<size_t> unicode_regex_split_custom_qwen35(const std::string &
     return bpe_offsets;
 }
 
+// 传入的是经过特殊字符替换后的文本，以及经过特殊字符替换后的正则表达式，这一步的 bpe_offsets 还是只有一个元素，其值为 cpts.size()
+// 即使用 0xD1 等替换后的
 template <typename CharT>
 static std::vector<size_t> unicode_regex_split_stl(const std::basic_string<CharT> & text, const std::basic_string<CharT> & regex, const std::vector<size_t> & offsets) {
     // BidirIt 是 Bidirectional Iterator（双向迭代器）的缩写。这意味着这个“指针”可以向前走，也可以向后走
@@ -869,6 +885,7 @@ static std::vector<size_t> unicode_regex_split_custom_kimi_k2(const std::string 
                     if (_get_cpt(pos) == '\'' && pos + 1 < offset_end) {
                         // 取单引号后面的那个字符，并转为小写，不是就返回原字符
                         uint32_t cpt_next = unicode_tolower(_get_cpt(pos + 1));
+                        // 判断单引号后面的那个字符是否是 s, t, m, d
                         if (cpt_next == 's' || cpt_next == 't' || cpt_next == 'm' || cpt_next == 'd') {
                             pos += 2;
                         } else if (pos + 2 < offset_end) {
@@ -890,6 +907,7 @@ static std::vector<size_t> unicode_regex_split_custom_kimi_k2(const std::string 
             }
 
             // Pattern 4: \p{N}{1,3} (numbers 1-3 digits)
+            // regex: \p{N}{1,3} 三位一断
             if (flags.is_number) {
                 size_t ini = pos;
                 while (_get_flags(pos).is_number) {
@@ -919,8 +937,8 @@ static std::vector<size_t> unicode_regex_split_custom_kimi_k2(const std::string 
             }
 
             // Count whitespace characters
-            size_t num_whitespaces = 0;
-            size_t last_end_r_or_n = 0;
+            size_t num_whitespaces = 0;  // 记录从当前位置（pos）开始，连续有多少个空白字符（空格、换行、制表符等）。
+            size_t last_end_r_or_n = 0;  // 记录这一串空白中，最后一个换行符（\r 或 \n） 所在的位置。
             while (_get_flags(pos + num_whitespaces).is_whitespace) {
                 uint32_t cpt2 = _get_cpt(pos + num_whitespaces);
                 if (cpt2 == '\r' || cpt2 == '\n') {
@@ -1061,6 +1079,7 @@ static std::vector<size_t> unicode_regex_split_custom_newlines(const std::string
     return bpe_offsets;
 }
 
+// 传入的是 fragment.raw_text 和 unicode_regex_split 里面申明的 std::vector<size_t> bpe_offsets = { cpts.size() };即 offsets = bpe_offsets
 static std::vector<size_t> unicode_regex_split_custom(const std::string & text, const std::string & regex_expr, const std::vector<size_t> & offsets) {
     std::vector<size_t> bpe_offsets;
 
@@ -1099,6 +1118,8 @@ static std::vector<size_t> unicode_regex_split_custom(const std::string & text, 
 // interface
 //
 
+// 把数字 “打包” 回标准字节流
+// 比如将 中 0x4E2D 转换为 0xE4 0xB8 0xAD
 std::string unicode_cpt_to_utf8(uint32_t cpt) {
     std::string result;
 
@@ -1141,6 +1162,8 @@ std::vector<uint32_t> unicode_cpts_normalize_nfd(const std::vector<uint32_t> & c
     return result;
 }
 
+// 传进来的实际上是 text，即 const auto cpts = unicode_cpts_from_utf8(text);
+// 把一串混乱的“原始字节”，变成一排整齐的“Unicode 编号”
 std::vector<uint32_t> unicode_cpts_from_utf8(const std::string & utf8) {
     std::vector<uint32_t> result;
     result.reserve(utf8.size());
@@ -1159,7 +1182,9 @@ std::vector<uint32_t> unicode_cpts_from_utf8(const std::string & utf8) {
     return result;
 }
 
+// 根据给出的编号（Codepoint），告诉这个字符到底是什么身份（是字母？数字？还是标点？）
 unicode_cpt_flags unicode_cpt_flags_from_cpt(const uint32_t cpt) {
+    // 如果查不到，默认返回“未定义”
     static const unicode_cpt_flags undef(unicode_cpt_flags::UNDEFINED);
     // 静态初始化一张巨大的“身份表”，里面包含 14 多万个字符对应的身份信息。
     static const auto cpt_flags = unicode_cpt_flags_array();
@@ -1230,6 +1255,7 @@ bool unicode_cpt_is_han(uint32_t cpt) {
     return false;
 }
 
+// 传入的是 fragment.raw_text
 std::vector<std::string> unicode_regex_split(const std::string & text, const std::vector<std::string> & regex_exprs, bool byte_encode) {
     // unicode categories
     static const std::map<std::string, int> k_ucat_enum = {
@@ -1273,6 +1299,8 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
         }
     }
 
+    // 输入：是一串原始的字节，像 0xC3 0xA9 这样零散的数据。
+    // 输出：是一串数字 codepoints，像 233 这样代表 Unicode 字符的编号。
     const auto cpts = unicode_cpts_from_utf8(text);
 
     // generate a "collapsed" representation of the text, where all codepoints are replaced by a single byte
@@ -1315,8 +1343,10 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
         }
     }
 
+    // 初始化一个只有一个元素的 vector，而这个元素的值是 cpts.size()。
     std::vector<size_t> bpe_offsets = { cpts.size() };
 
+    // 分词逻辑
     for (const auto & regex_expr : regex_exprs) {
         // first, see if we have an efficient custom regex implementation
         // first, see if we have an efficient custom regex implementation
@@ -1340,6 +1370,9 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                 }
             }
             // sanity-check that the original regex does not contain any non-ASCII characters
+            // 不包含泛化 Unicode 属性（如 \p{L}）的简单正则表达式
+            // 把正则表达式转成“以字符为单位”的序列，这样匹配引擎就能按“字符”匹配，而不会把字符切碎。
+            // 把 “长短不一的一串字节” 翻译成 “一个萝卜一个坑的一串字符”
             const auto cpts_regex = unicode_cpts_from_utf8(regex_expr);
 
             if (use_collapsed) {
@@ -1423,6 +1456,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
         }
     }
 
+    // 存放这些最终词块的仓库，假设之前的数字是 {2, 1, 5}，接下来的目标是把它们变成具体的："Hi", " ", "World"。
     std::vector<std::string> bpe_words;
     bpe_words.reserve(bpe_offsets.size()); // reserve memory for the approximate size
 
@@ -1437,6 +1471,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
     }
 
     if (byte_encode) {
+        // 至此，bpe_words 里面装的就是“切好的小词块”，一个示例 bpe_words = {"Hi!", " ", "🙂" }
         return unicode_byte_encoding_process(bpe_words);
     }
 

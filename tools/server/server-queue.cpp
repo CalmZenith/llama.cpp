@@ -136,6 +136,10 @@ void server_queue::terminate() {
 }
 
 bool server_queue::process_new_tasks(bool is_yielding) {
+    // 这个循环会处理所有当前队列中的任务
+    // 这个 while 循环执行结束的那一瞬间，queue_tasks (主队列)彻底清空
+    // 去向 A (Active)：如果当时有空闲的槽位，任务就通过 launch_slot_with_task 成功“入场”了，此时这些 Slot 的状态变为了 STARTED。
+    // 去向 B (Deferred)：如果没有空闲槽位，任务就被推进 queue_tasks_deferred，等待后续被 pop_deferred_task 重新放回主队列。
     while (true) {
         std::unique_lock<std::mutex> lock(mutex_tasks);
         if (!running) {
@@ -150,6 +154,7 @@ bool server_queue::process_new_tasks(bool is_yielding) {
         lock.unlock();
 
         QUE_DBG("processing task, id = %d\n", task.id);
+        // 映射到 server-context.cpp 的 process_single_task 函数
         if (!callback_new_task(std::move(task), is_yielding)) {
             // set it aside, do not put it back in the queue, else we offer it again in a loop
             GGML_ASSERT(is_yielding && "a task can only be declined while yielding");
@@ -286,6 +291,8 @@ void server_queue::start_loop(int64_t idle_sleep_ms) {
     worker.yielding = false;
     worker.thread = std::thread([this]() { worker_loop(); });
 
+    // 目前 idle_sleep_ms 默认是 -1，所以 server 的默认状态是不休眠
+    // 这个参数时休眠情况下也会每隔 1 秒主动醒来检查一次：“我是不是该去睡觉了？”
     constexpr auto max_wait_time = std::chrono::seconds(1);
     auto should_sleep = [&]() -> bool {
         // caller must hold mutex_tasks
@@ -317,6 +324,7 @@ void server_queue::start_loop(int64_t idle_sleep_ms) {
         }
 
         QUE_DBG("%s", "waiting for new tasks\n");
+        // 要么等待新任务，要么休眠
         while (true) {
             std::unique_lock<std::mutex> lock(mutex_tasks);
             if (!running || !queue_tasks.empty()) {
