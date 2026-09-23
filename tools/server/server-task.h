@@ -104,7 +104,6 @@ struct task_params {
 // struct for tracking the state of a task (e.g., for streaming)
 struct task_result_state {
     // tracking diffs for partial tool calls
-    // tracking diffs for partial tool calls
     // 记录每次生成中“变化量”的列表。
     std::vector<common_chat_msg_diff> diffs;
     // 为了生成增量数据，我们需要保存一些“基准状态”。

@@ -195,7 +195,6 @@ private:
         // 这个 Symbol 既不是预定义的 Token，也不是通过两两合并产生的。它可能是某个非法字符，或者是模型完全没见过的东西。
         if (p == rev_merge.end()) {
             // output any symbols that did not form tokens as bytes.
-            // output any symbols that did not form tokens as bytes.
             // 将这个无法识别的 Symbol 拆解成单个字节，并逐个转换成 Token 加入输出列表。
             output.reserve(output.size() + symbol.n);
             for (int j = 0; j < (int)symbol.n; ++j) {

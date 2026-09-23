@@ -3844,7 +3844,6 @@ private:
 
         iterate(slots, [&](server_slot & slot) {
             // optionally send prompt processing progress
-            // optionally send prompt processing progress
             // 显示进度条的
             if (slot.state == SLOT_STATE_PROCESSING_PROMPT || slot.state == SLOT_STATE_DONE_PROMPT) {
                 if (slot.task->params.stream && slot.task->params.return_progress) {

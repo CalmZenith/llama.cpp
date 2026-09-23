@@ -31,7 +31,6 @@ const char * llama_file_version_name(llama_fver version);
 
 struct llama_model_loader {
     // Holds information on a model weight
-    // Holds information on a model weight
     // 这是一个内部结构体，用于描述模型中的一个权重（Tensor）在原始文件中的位置和状态。
     // 当模型被加载时，加载器会先扫描文件头（GGUF 元数据），为每个张量创建一个这种“索引”，以便后续真正读取数据时知道去文件的哪里找。
     struct llama_tensor_weight {

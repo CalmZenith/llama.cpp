@@ -936,7 +936,6 @@ int64_t llama_context::output_resolve_row(int32_t i) const {
 
     if (j >= n_outputs) {
         // This should not happen
-        // This should not happen
         throw std::runtime_error(format("corrupt output buffer (j=%" PRId64 ", n_outputs=%d)", j, n_outputs));
     }
 
@@ -1895,7 +1894,6 @@ int llama_context::decode(const llama_batch & batch_inp) {
         const auto * res = process_ubatch(ubatch, ctx_type_to_graph_type(cparams.ctx_type), mctx.get(), status);
 
         if (!res) {
-            // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
             // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
             // Cross point P3<->P4:
             // P4 reports failure on a ubatch, P3-owned memory state must roll back by seq/pos range.

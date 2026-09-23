@@ -33,7 +33,6 @@ struct unicode_cpt_flags {
     uint16_t is_symbol      : 1;  // regex: \p{S}
     uint16_t is_control     : 1;  // regex: \p{C}
     // helper flags
-    // helper flags
     // 辅助状态
     uint16_t is_whitespace  : 1;  // regex: \s
     uint16_t is_lowercase   : 1;

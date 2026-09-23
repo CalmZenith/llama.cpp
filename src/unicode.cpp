@@ -1312,7 +1312,6 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
 
         for (size_t i = 0; i < cpts.size(); ++i) {
             // keep single-byte codepoints as is
-            // keep single-byte codepoints as is
             // 128 以下也就是 ASCII 字符，对于 C++ 的正则引擎（std::regex）来说，它本生就是为了处理单字节的 ASCII 字符设计的。
             // 它认识 A-Z。它认识 0-9。它认识空格、标点符号。
             // 所以，根本没必要把一个本来就是单字节的 A 再映射成另一个单字节的 X。直接让它保持原样，正则引擎就能处理得很好。
@@ -1348,7 +1347,6 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
 
     // 分词逻辑
     for (const auto & regex_expr : regex_exprs) {
-        // first, see if we have an efficient custom regex implementation
         // first, see if we have an efficient custom regex implementation
         // 这个函数返回的是每个 token 的长度，举个例子 bpe_offsets = {8, 12, 5, 11, 13, 1}。
         auto tmp = unicode_regex_split_custom(text, regex_expr, bpe_offsets);

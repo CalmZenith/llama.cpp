@@ -133,16 +133,13 @@ int main(int argc, char ** argv) {
 
     llama_context_params ctx_params = llama_context_default_params();
     // n_ctx is the context size
-    // n_ctx is the context size
     // 动态分配上下文窗口大小
     ctx_params.n_ctx = n_prompt + n_predict - 1;
-    // n_batch is the maximum number of tokens that can be processed in a single call to llama_decode
     // n_batch is the maximum number of tokens that can be processed in a single call to llama_decode
     // 动态分配批处理大小
     // n_batch 决定了模型一次能处理多少个字。把这个值设为 Prompt 的总长度，
     // 意味着我们在初次“预习” Prompt 时，不用分批，直接一个 Batch 全部算完。
     ctx_params.n_batch = n_prompt;
-    // enable performance counters
     // enable performance counters
     // 启用性能计数器
     ctx_params.no_perf = false;
@@ -216,7 +213,6 @@ int main(int argc, char ** argv) {
     // n_pos + batch.n_tokens: 加上这批数据后，总共处理到了哪里。
     // n_prompt + n_predict: 预估的总长度（Prompt长度 + 想要生成的长度）。
     for (int n_pos = 0; n_pos + batch.n_tokens < n_prompt + n_predict; ) {
-        // evaluate the current batch with the transformer model
         // evaluate the current batch with the transformer model
         // 把 batch 里的词喂给模型，模型会计算出几万个候选词的概率分布（Logits）。
         if (llama_decode(ctx, batch)) {
