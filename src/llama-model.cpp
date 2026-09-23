@@ -1191,6 +1191,7 @@ struct llama_model::impl {
     std::vector<std::pair<ggml_context_ptr, std::vector<ggml_backend_buffer_ptr>>> ctxs_bufs;
 
     buft_list_t cpu_buft_list;
+    // gpu_buft_list: GPU 相关的缓冲区列表（以设备为键）。
     std::map<ggml_backend_dev_t, buft_list_t> gpu_buft_list;
 
     struct layer_dev {
@@ -1199,7 +1200,10 @@ struct llama_model::impl {
     };
 
     layer_dev dev_input = {};
+    // dev_output: 输出相关的设备信息和缓冲区列表。
     layer_dev dev_output = {};
+    // dev_layer: 模型中所有层的设备信息和缓冲区列表。
+    // 记录了模型中间几十个 Transformer 层分别被分配到了哪个设备上（比如设置了 -ngl 30，那么数组前 30 个元素就是 GPU，剩下的就是 CPU）。
     std::vector<layer_dev> dev_layer;
 
     bool has_tensor_overrides;
@@ -1214,6 +1218,7 @@ llama_model::llama_model(const llama_model_params & params) : params(params), pi
         pimpl->tensor_split_owned.assign(params.tensor_split, params.tensor_split + llama_max_devices());
         this->params.tensor_split = pimpl->tensor_split_owned.data();
     }
+    // tensor_buft_overrides 是用来强行指定某个张量（比如 output.weight）必须放在 CPU 还是 GPU 的“特权表”。
     pimpl->has_tensor_overrides = params.tensor_buft_overrides && params.tensor_buft_overrides[0].pattern;
 }
 
@@ -1566,7 +1571,7 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         // generic pass: load optional per-tensor/per-expert ".scale" tensors (e.g. NVFP4 scale2)
         // this avoids having to add scale loading to every architecture
         for (int i = 0; i < n_layer_all; ++i) {
-            auto & layer = layers[i];
+            auto & layer = layers[i];  // JinaBertLayer
 
             // attention weight scales (per-tensor, shape {1})
             if (!layer.wq_s && layer.wq) {
@@ -1776,6 +1781,10 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         if ((ml.use_mmap || is_lazy_mapped) && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
             GGML_ASSERT(!ml.no_alloc);
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
+                // only the mmap region containing the tensors in the model is mapped to the backend buffer
+                // this is important for metal with apple silicon: if the entire model could be mapped to a metal buffer,
+                //     then we could just use metal for all layers
+                // this allows using partial offloading when the model size exceeds the metal buffer size, but not the RAM size
                 // only the mmap region containing the tensors in the model is mapped to the backend buffer
                 // this is important for metal with apple silicon: if the entire model could be mapped to a metal buffer,
                 //     then we could just use metal for all layers

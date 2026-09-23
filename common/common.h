@@ -175,7 +175,7 @@ enum common_speculative_type {
     COMMON_SPECULATIVE_TYPE_DRAFT_MTP,     // Multi-token prediction
     COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH,  // DFlash speculative decoding
     COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK,  // DSpark speculative decoding (DFlash + Markov head)
-    COMMON_SPECULATIVE_TYPE_NGRAM_SIMPLE,  // simple self-speculative decoding based on n-grams
+    COMMON_SPECULATIVE_TYPE_NGRAM_SIMPLE,  // simple self-speculative decoding
     COMMON_SPECULATIVE_TYPE_NGRAM_MAP_K,   // self-speculative decoding with n-gram keys only
     COMMON_SPECULATIVE_TYPE_NGRAM_MAP_K4V, // self-speculative decoding with n-gram keys and 4 m-gram values
     COMMON_SPECULATIVE_TYPE_NGRAM_MOD,
@@ -194,7 +194,7 @@ enum common_grammar_type {
 // Grammar variant struct with type and grammar string
 struct common_grammar {
     common_grammar_type type = COMMON_GRAMMAR_TYPE_NONE;
-    std::string grammar;
+    std::string grammar;  // optional BNF-like grammar to constrain sampling
 
     // Default constructor - no grammar
     common_grammar() = default;
@@ -236,7 +236,7 @@ struct common_params_sampling {
     float   temp               = 0.80f;  // <= 0.0 to sample greedily, 0.0 to not output probabilities
     float   dynatemp_range     = 0.00f;  // 0.0 = disabled
     float   dynatemp_exponent  = 1.00f;  // controls how entropy maps to temperature in dynamic temperature sampler
-    int32_t penalty_last_n     = 64;     // last n tokens to penalize (0 = disable penalty)
+    int32_t penalty_last_n     = 64;  // last n tokens to penalize (0 = disable penalty, -1 = context size)
     float   penalty_repeat     = 1.00f;  // 1.0 = disabled
     float   penalty_freq       = 0.00f;  // 0.0 = disabled
     float   penalty_present    = 0.00f;  // 0.0 = disabled
@@ -300,11 +300,11 @@ struct common_params_sampling {
 };
 
 struct common_params_model {
-    std::string path        = ""; // model local path
-    std::string url         = ""; // model url to download
-    std::string hf_repo     = ""; // HF repo
-    std::string hf_file     = ""; // HF file
-    std::string docker_repo = ""; // Docker repo
+    std::string path        = "";  // model local path                                       // NOLINT
+    std::string url         = "";  // model url to download                                  // NOLINT
+    std::string hf_repo     = "";  // HF repo                                                // NOLINT
+    std::string hf_file     = "";  // HF file                                                // NOLINT
+    std::string docker_repo = "";  // Docker repo                                            // NOLINT
 
     std::string get_name() const {
         if (!hf_repo.empty()) {
@@ -363,8 +363,8 @@ struct common_params_speculative_ngram_map {
 };
 
 struct common_params_speculative_ngram_cache {
-    std::string lookup_cache_static;  // path of static ngram cache file for lookup decoding
-    std::string lookup_cache_dynamic; // path of dynamic ngram cache file for lookup decoding
+    std::string lookup_cache_static;  // path of static ngram cache file for lookup decoding           // NOLINT
+    std::string lookup_cache_dynamic;  // path of dynamic ngram cache file for lookup decoding          // NOLINT
 };
 
 struct common_params_speculative {
@@ -447,7 +447,7 @@ struct ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
 struct common_params {
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
-    int32_t n_ctx                 =     0; // context size, 0 == context the model was trained with
+    int32_t n_ctx                 =     0;  // draft context size
     int32_t n_batch               =  2048; // logical batch size for prompt processing (must be >=32 to use BLAS)
     int32_t n_ubatch              =   512; // physical batch size for prompt processing (must be >=32 to use BLAS)
     int32_t n_keep                =     0; // number of tokens to keep from initial prompt
@@ -506,7 +506,7 @@ struct common_params {
 
     std::set<std::string> model_alias;     // model aliases                                                 // NOLINT
     std::set<std::string> model_tags;      // model tags (informational, not used for routing)              // NOLINT
-    std::string hf_token             = ""; // HF token (aka bearer token)                                   // NOLINT
+    std::string hf_token             = "";  // HF token                                                      // NOLINT
     std::string prompt               = "";                                                                  // NOLINT
     std::string system_prompt        = "";                                                                  // NOLINT
     std::string prompt_file          = ""; // store the external prompt file name                           // NOLINT
@@ -594,7 +594,7 @@ struct common_params {
     bool mmproj_use_gpu = true;                 // use GPU for multimodal model
     ggml_backend_dev_t mmproj_device = nullptr; // GPU device to use for multimodal model
     bool no_mmproj = false;                     // explicitly disable multimodal model
-    std::vector<std::string> image;             // path to image file(s) ; TODO: change the name to "media"
+    std::vector<std::string> image;  // path to image file(s)
     int image_min_tokens = -1;
     int image_max_tokens = -1;
     int mtmd_batch_max_tokens = 1024;

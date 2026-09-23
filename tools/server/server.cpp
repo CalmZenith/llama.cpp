@@ -194,6 +194,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
     server_routes routes(params, ctx_server);
     server_tools tools;
 
+    // 路由管理器容器。如果作为网关运行，它将持有所有后台工人服务器的“名册”和“转发逻辑”。
     std::optional<server_models_routes> models_routes{};
 
     server_http_context ctx_http;

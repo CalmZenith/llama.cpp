@@ -31,13 +31,20 @@ const char * llama_file_version_name(llama_fver version);
 
 struct llama_model_loader {
     // Holds information on a model weight
+    // Holds information on a model weight
+    // 这是一个内部结构体，用于描述模型中的一个权重（Tensor）在原始文件中的位置和状态。
+    // 当模型被加载时，加载器会先扫描文件头（GGUF 元数据），为每个张量创建一个这种“索引”，以便后续真正读取数据时知道去文件的哪里找。
     struct llama_tensor_weight {
+        // 源文件索引：现在的模型往往很大，经常会被切分成多个文件（如 model-00001-of-00005.gguf）。
+        // 这个 idx 就代表这个张量存放在第几个分片文件中。
         uint16_t  idx; // source file index
+        // 数据在文件中的偏移量：它记录了该张量的原始二进制数据从文件的第几个字节开始。
         size_t   offs; // tensor data offset in the original file
 
         ggml_tensor * tensor;
 
         llama_tensor_weight(const llama_file * file, uint16_t idx, const struct gguf_context * gguf_ctx, ggml_tensor * tensor) : idx(idx), tensor(tensor) {
+            // 根据张量的名字（如 "token_embd.weight"），在 GGUF 文件的索引区查找它的序号 tensor_idx。
             const int tensor_idx = gguf_find_tensor(gguf_ctx,  ggml_get_name(tensor));
             if (tensor_idx < 0) {
                 throw std::runtime_error(format("tensor '%s' not found in the model", ggml_get_name(tensor)));
@@ -53,10 +60,16 @@ struct llama_model_loader {
     // custom comparator to sort weights more nicely by layer
     struct weight_name_comparer {
         bool operator()(const std::string & a, const std::string & b) const {
+            // 提取层号：
+            // 尝试从权重名中提取层号（例如，从 "blk.10.attn_q.weight" 中提取 10）。
+            // sscanf 函数在这里被用来解析字符串。
             int a_layer = -1;
             int b_layer = -1;
             sscanf(a.c_str(), "blk.%d.", &a_layer);
             sscanf(b.c_str(), "blk.%d.", &b_layer);
+            // 按层号排序：
+            // 如果两个权重属于不同的层，就按照层号的大小来排序。
+            // 这样就能确保 blk.0 的所有权重都在 blk.1 的所有权重之前。
             if (a_layer != b_layer) {
                 return a_layer < b_layer;
             }
@@ -65,22 +78,30 @@ struct llama_model_loader {
     };
 
     static const int TENSOR_NOT_REQUIRED    = 1 << 0;
+    // 重复张量。标记该张量的数据可能被多个对象共享，在内存分配时需要特殊处理。
     static const int TENSOR_DUPLICATED      = 1 << 1;
+    // 跳过张量。该张量不应该被加载（例如，由于内存限制或用户配置）。
     static const int TENSOR_SKIP            = 1 << 2;
     static const int TENSOR_SKIP_IF_VIRTUAL = 1 << 3;
     static const int TENSOR_ALLOW_RESHAPE   = 1 << 4;
     static const int TENSOR_READ_LAZY       = 1 << 5; // read rows on demand instead of loading whole tensor; requires mmap for now
 
     int n_kv      = 0;
+    // 模型中的张量总数。
     int n_tensors = 0;
+    // 已经在内存中成功创建的张量数量。
     int n_created = 0;
 
     uint64_t n_elements = 0;
+    // 模型中所有张量的总字节数。
     size_t   n_bytes    = 0;
 
     bool use_mmap = false;
+    // 是否使用直接 I/O（Direct I/O）来读取文件。
     bool use_direct_io = false;
+    // 是否检查张量。
     bool check_tensors;
+    // 是否不分配内存。
     bool no_alloc;
     bool load_mtp;
 
@@ -118,22 +139,28 @@ struct llama_model_loader {
     } lazy;
 
     llama_files files;
+    // 模型文件类型，例如 F16, Q4_K_M 等，代表了模型的压缩/量化级别。
     llama_ftype ftype;
+    // 模型文件版本，GGUF 的版本号，如 v3。
     llama_fver  fver;
 
     llama_mmaps mappings;
 
     std::map<std::string, llama_tensor_weight, weight_name_comparer> weights_map;
+    // KV 键值对覆盖。用户可以在启动时手动指定一些参数，这些手动设置的值会存放在这里，加载时会优先使用它们，而不是文件里自带的值
     std::unordered_map<std::string, llama_model_kv_override> kv_overrides;
+    // 张量缓冲区覆盖。允许用户在启动时指定某些张量使用特定的缓冲区类型（例如，强制使用 GPU 缓冲区而不是 CPU 缓冲区）。
     const llama_model_tensor_buft_override * tensor_buft_overrides;
 
     gguf_context_ptr metadata_ptr;
     struct gguf_context * metadata; // either metadata_ptr.get() or externally set
     llama_model_set_tensor_data_t set_tensor_data;
     void * set_tensor_data_ud;
+    // GGUF 文件中的张量数据上下文。
     std::vector<ggml_context_ptr> contexts;
 
     std::string arch_name;
+    // 一个辅助对象，用于根据模型的架构快速读取对应的元数据键值。
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
     size_t size_done = 0;

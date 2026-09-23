@@ -29,14 +29,17 @@ static std::string unicode_cpts_to_utf8(const std::vector<uint32_t> & cps) {
 
 uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
     assert(offset < utf8.size());
+    // 如果首字节是 0xxxxxxx（最高位是 0），说明是 1 字节的 ASCII 字符，如字符A
     if (!(utf8[offset + 0] & 0x80)) {
         auto result = utf8[offset + 0];
         offset += 1;
         return result;
     }
+    // 如果首字节是 10xxxxxx（最高位是 1，次高位是 0），说明是无效字符
     if (!(utf8[offset + 0] & 0x40)) {
         throw std::invalid_argument("invalid character");
     }
+    // 如果首字节是 110xxxxx（最高位是 110），说明是 2 字节的字符，如字符é
     if (!(utf8[offset + 0] & 0x20)) {
         if (offset + 1 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80)) {
             throw std::invalid_argument("invalid character");
@@ -45,6 +48,7 @@ uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
         offset += 2;
         return result;
     }
+    // 如果首字节是 1110xxxx（最高位是 1110），说明是 3 字节的字符，如字符“你”
     if (!(utf8[offset + 0] & 0x10)) {
         if (offset + 2 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80) || ! ((utf8[offset + 2] & 0xc0) == 0x80)) {
             throw std::invalid_argument("invalid character");
@@ -53,6 +57,7 @@ uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
         offset += 3;
         return result;
     }
+    // 如果首字节是 11110xxx（最高位是 11110），说明是 4 字节的字符，如表情包Emoji
     if (!(utf8[offset + 0] & 0x08)) {
         if (offset + 3 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80) || ! ((utf8[offset + 2] & 0xc0) == 0x80) || !((utf8[offset + 3] & 0xc0) == 0x80)) {
             throw std::invalid_argument("invalid character");
@@ -114,6 +119,7 @@ uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
 //}
 
 static std::vector<unicode_cpt_flags> unicode_cpt_flags_array() {
+    // 初始化一个足够大的数组，默认所有字符都是未定义的
     std::vector<unicode_cpt_flags> cpt_flags(MAX_CODEPOINTS, unicode_cpt_flags::UNDEFINED);
 
     assert (unicode_ranges_flags.begin()[0].first == 0);
@@ -197,6 +203,7 @@ static std::vector<std::string> unicode_byte_encoding_process(const std::vector<
     std::vector<std::string> bpe_encoded_words;
     for (const auto & word : bpe_words) {
         std::string text_utf;
+        // 先转换为码点，再转换回去
         auto utf_word =  unicode_cpts_from_utf8(word);
         for (size_t i = 0; i < utf_word.size(); ++i) {
             text_utf += unicode_cpt_to_utf8(utf_word[i]);
@@ -204,6 +211,7 @@ static std::vector<std::string> unicode_byte_encoding_process(const std::vector<
 
         std::string encoded_token;
         for (char & c : text_utf) {
+            // 这个的返回值是经过映射后的字节，有可能和它原本的字节不一致
             encoded_token += unicode_byte_to_utf8(c);
         }
         bpe_encoded_words.emplace_back(encoded_token);
@@ -737,6 +745,7 @@ static std::vector<size_t> unicode_regex_split_custom_qwen35(const std::string &
 
 template <typename CharT>
 static std::vector<size_t> unicode_regex_split_stl(const std::basic_string<CharT> & text, const std::basic_string<CharT> & regex, const std::vector<size_t> & offsets) {
+    // BidirIt 是 Bidirectional Iterator（双向迭代器）的缩写。这意味着这个“指针”可以向前走，也可以向后走
     using BidirIt = typename std::basic_string<CharT>::const_iterator;
 #ifdef _MSC_VER
     // Bypass bug in MSVC: https://github.com/ggml-org/llama.cpp/issues/17830
@@ -744,12 +753,16 @@ static std::vector<size_t> unicode_regex_split_stl(const std::basic_string<CharT
 #else
     constexpr auto regex_flags = std::regex_constants::optimize | std::regex_constants::nosubs;
 #endif
-    std::basic_regex<CharT> expr(regex, regex_flags);
+    std::basic_regex<CharT> expr(regex, regex_flags);  // 编译正则表达式
     std::vector<size_t> bpe_offsets; // store the offset of each word
     bpe_offsets.reserve(offsets.size()); // Reserve memory for the approximate size
     size_t start = 0;
     for (auto offset : offsets) {
+        // std::regex_iterator 是 C++ 正则库里一个非常高级且好用的迭代器工具。它可以像遍历数组一样，去遍历文本里所有的正则表达式匹配项。
+        // expr 是搜索规则
         std::regex_iterator<BidirIt> it(text.begin() + start, text.begin() + start + offset, expr);
+        // 在 C++ 正则库里，一个 默认构造（即括号里什么都不传）的 regex_iterator 是一个特殊的信号。
+        // 它代表“匹配结束”或者“没有更多匹配了”。
         std::regex_iterator<BidirIt> end;
 
         int64_t start_idx = 0;
@@ -854,6 +867,7 @@ static std::vector<size_t> unicode_regex_split_custom_kimi_k2(const std::string 
 
                     // Check for optional contractions (?:'s|'t|'re|'ve|'m|'ll|'d)
                     if (_get_cpt(pos) == '\'' && pos + 1 < offset_end) {
+                        // 取单引号后面的那个字符，并转为小写，不是就返回原字符
                         uint32_t cpt_next = unicode_tolower(_get_cpt(pos + 1));
                         if (cpt_next == 's' || cpt_next == 't' || cpt_next == 'm' || cpt_next == 'd') {
                             pos += 2;
@@ -1133,6 +1147,7 @@ std::vector<uint32_t> unicode_cpts_from_utf8(const std::string & utf8) {
     size_t offset = 0;
     while (offset < utf8.size()) {
         try {
+            // 尝试从当前位置读取一个完整的 Unicode 字符
             result.push_back(unicode_cpt_from_utf8(utf8, offset));
         }
         catch (const std::invalid_argument & /*ex*/) {
@@ -1146,7 +1161,9 @@ std::vector<uint32_t> unicode_cpts_from_utf8(const std::string & utf8) {
 
 unicode_cpt_flags unicode_cpt_flags_from_cpt(const uint32_t cpt) {
     static const unicode_cpt_flags undef(unicode_cpt_flags::UNDEFINED);
+    // 静态初始化一张巨大的“身份表”，里面包含 14 多万个字符对应的身份信息。
     static const auto cpt_flags = unicode_cpt_flags_array();
+    // 检查这个编号是否在表的范围内，如果在，就直接返回它对应的身份信息；如果超出了（比如你传入了一个更大的数字），就返回“未定义”。
     return cpt < cpt_flags.size() ? cpt_flags[cpt] : undef;
 }
 
@@ -1216,24 +1233,24 @@ bool unicode_cpt_is_han(uint32_t cpt) {
 std::vector<std::string> unicode_regex_split(const std::string & text, const std::vector<std::string> & regex_exprs, bool byte_encode) {
     // unicode categories
     static const std::map<std::string, int> k_ucat_enum = {
-        { "\\p{N}", unicode_cpt_flags::NUMBER },
-        { "\\p{L}", unicode_cpt_flags::LETTER },
-        { "\\p{P}", unicode_cpt_flags::PUNCTUATION },
-        { "\\p{M}", unicode_cpt_flags::ACCENT_MARK },
-        { "\\p{S}", unicode_cpt_flags::SYMBOL },
-        { "\\p{Lu}", unicode_cpt_flags::LETTER }, // Uppercase letter
-        { "\\p{Ll}", unicode_cpt_flags::LETTER }, // Lowercase letter
-        { "\\p{Lt}", unicode_cpt_flags::LETTER }, // Titlecase letter
-        { "\\p{Lm}", unicode_cpt_flags::LETTER }, // Modifier letter
-        { "\\p{Lo}", unicode_cpt_flags::LETTER }, // Other letter
+        { "\\p{N}", unicode_cpt_flags::NUMBER },  // 所有数字，含罗马数字、分数等
+        { "\\p{L}", unicode_cpt_flags::LETTER },  // 所有语言的字母
+        { "\\p{P}", unicode_cpt_flags::PUNCTUATION },  // 所有的标点符号
+        { "\\p{M}", unicode_cpt_flags::ACCENT_MARK },  // 所有的变音符号
+        { "\\p{S}", unicode_cpt_flags::SYMBOL },  // 数学符号、货币符号、Emoji
+        { "\\p{Lu}", unicode_cpt_flags::LETTER },  // 大写字母
+        { "\\p{Ll}", unicode_cpt_flags::LETTER },  // 小写字母
+        { "\\p{Lt}", unicode_cpt_flags::LETTER },  // 首字母大写字母
+        { "\\p{Lm}", unicode_cpt_flags::LETTER },  // 修饰字母
+        { "\\p{Lo}", unicode_cpt_flags::LETTER },  // 其他字母
     };
 
     static const std::map<int, int> k_ucat_cpt = {
-        { unicode_cpt_flags::NUMBER,      0xD1 },
-        { unicode_cpt_flags::LETTER,      0xD2 },
-        { unicode_cpt_flags::PUNCTUATION, 0xD3 },
-        { unicode_cpt_flags::ACCENT_MARK, 0xD4 },
-        { unicode_cpt_flags::SYMBOL,      0xD5 },
+        { unicode_cpt_flags::NUMBER,      0xD1 },  // 数字
+        { unicode_cpt_flags::LETTER,      0xD2 },  // 字母
+        { unicode_cpt_flags::PUNCTUATION, 0xD3 },  // 标点符号
+        { unicode_cpt_flags::ACCENT_MARK, 0xD4 },  // 变音符号
+        { unicode_cpt_flags::SYMBOL,      0xD5 },  // 符号
     };
 
     static const std::map<int, std::string> k_ucat_map = {
@@ -1267,6 +1284,11 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
 
         for (size_t i = 0; i < cpts.size(); ++i) {
             // keep single-byte codepoints as is
+            // keep single-byte codepoints as is
+            // 128 以下也就是 ASCII 字符，对于 C++ 的正则引擎（std::regex）来说，它本生就是为了处理单字节的 ASCII 字符设计的。
+            // 它认识 A-Z。它认识 0-9。它认识空格、标点符号。
+            // 所以，根本没必要把一个本来就是单字节的 A 再映射成另一个单字节的 X。直接让它保持原样，正则引擎就能处理得很好。
+            // 当代码点 大于等于 128（即非 ASCII 字符，比如中文、韩文、带重音的法语）时，映射才真正开始工作
             if (cpts[i] < 128) {
                 text_collapsed[i] = cpts[i];
                 continue;
@@ -1277,8 +1299,15 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
             if (flags.is_whitespace) {
                 //NOTE: C++ std::regex \s does not mach 0x85, Rust and Python regex does.
                 //text_collapsed[i] = (char) 0x85;  // <Next Line> as whitespace fallback
+                //NOTE: C++ std::regex \s does not mach 0x85, Rust and Python regex does.
+                //text_collapsed[i] = (char) 0x85;  // <Next Line> as whitespace fallback
+                // 不管是哪国空格，只要是空格，就统一替换成 ASCII 码里的 0x0B（垂直制表符）
                 text_collapsed[i] = (char) 0x0B;    // <vertical tab> as whitespace fallback
             } else if (k_ucat_cpt.find(flags.category_flag()) != k_ucat_cpt.end()) {
+                // 它查了一张映射表（k_ucat_cpt），把复杂的字符变成了一个简单的字节
+                // 如果是字母 (Letter)：不论是中文“你”、泰文还是德语，统一变成字节 0xD2。
+                // 如果是数字 (Number)：统一变成字节 0xD1。
+                // 如果是标点 (Punctuation)：统一变成字节 0xD3。
                 text_collapsed[i] = k_ucat_cpt.at(flags.category_flag());
             } else {
                 text_collapsed[i] = (char) 0xD0; // fallback
@@ -1290,6 +1319,8 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
 
     for (const auto & regex_expr : regex_exprs) {
         // first, see if we have an efficient custom regex implementation
+        // first, see if we have an efficient custom regex implementation
+        // 这个函数返回的是每个 token 的长度，举个例子 bpe_offsets = {8, 12, 5, 11, 13, 1}。
         auto tmp = unicode_regex_split_custom(text, regex_expr, bpe_offsets);
 
         if (!tmp.empty()) {
@@ -1308,6 +1339,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                     break;
                 }
             }
+            // sanity-check that the original regex does not contain any non-ASCII characters
             const auto cpts_regex = unicode_cpts_from_utf8(regex_expr);
 
             if (use_collapsed) {
@@ -1322,8 +1354,9 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                 std::string regex_expr_collapsed;
 
                 // track if we are inside [], because nested [] are not allowed
-                bool inside = false;
+                bool inside = false;  // 记录现在是不是正处于正则表达式的中括号 [...] 内部
                 for (size_t i = 0; i < regex_expr.size(); ++i) {
+                    // '\\'代表的其实是字符'\'
                     if (regex_expr[i] == '[' && (i == 0 || regex_expr[i - 1] != '\\')) {
                         regex_expr_collapsed += '[';
                         inside = true;
@@ -1348,6 +1381,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                                 if (!inside) {
                                     regex_expr_collapsed += '[';
                                 }
+                                // 比如 pat 是 \p{L}，那么 regex_expr_collapsed 会存入[\xD2A-Za-z]
                                 regex_expr_collapsed += k_ucat_cpt.at(k_ucat_enum.at(pat));
                                 regex_expr_collapsed += k_ucat_map.at(k_ucat_enum.at(pat));
                                 if (!inside) {
@@ -1372,6 +1406,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                 // std::wregex \s does not mach non-ASCII whitespaces, using 0x0B as fallback
                 std::wstring wtext(cpts.begin(), cpts.end());
                 for (size_t i = 0; i < wtext.size(); ++i) {
+                    // 如果这个字符不是 ASCII 字符 (> 0x7F) 并且根据我们自己的 Unicode 旗帜表，它被标记为“空白符” (is_whitespace)
                     if (wtext[i] > 0x7F && unicode_cpt_flags_from_cpt(wtext[i]).is_whitespace) {
                         wtext[i] = 0x0B;
                     }
@@ -1395,6 +1430,7 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
     for (size_t & offset : bpe_offsets) {
         bpe_words.emplace_back();
         for (size_t i = start; i < start + offset; ++i) {
+            // 把 32 位的数字 (如 0x1F642) 转回多字节的 UTF-8 字符串，然后累加进当前这个单词里
             bpe_words.back() += unicode_cpt_to_utf8(cpts[i]);
         }
         start += offset;

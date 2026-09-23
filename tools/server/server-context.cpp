@@ -267,9 +267,9 @@ struct server_slot {
     int64_t t_last_used = -1;
 
     // generation props
-    int32_t n_ctx   = 0;  // context size per slot
-    int32_t n_keep  = 0;
-    int32_t i_batch = -1;
+    int32_t n_ctx   = 0;  // context size per slot 当前这个流水线最多允许吃多少个词
+    int32_t n_keep  = 0;  // prompt 中保留多少个词
+    int32_t i_batch = -1;  // 用于取预测结果的
 
     // effective generation limit for the current task, -1 means unlimited
     int32_t n_predict_max = -1;
@@ -279,7 +279,7 @@ struct server_slot {
     std::string  generated_text;
     std::string  debug_generated_text;
     llama_tokens generated_tokens;
-    size_t n_sent_text = 0; // number of sent text character (i.e. handle partial UTF-8 on streaming)
+    size_t n_sent_text = 0;  // number of sent text character
 
     std::vector<completion_token_output> generated_token_probs;
 
@@ -844,8 +844,8 @@ public:
     mtmd_helper_init_opt init_opt = mtmd_helper_init_opt_default();
     const llama_vocab * vocab = nullptr;
 
-    server_queue    queue_tasks;
-    server_response queue_results;
+    server_queue    queue_tasks;  // 任务队列
+    server_response queue_results;  // 结果队列
 
     // note: chat_params must not be refreshed upon existing sleeping state
     server_chat_params chat_params;
@@ -904,7 +904,7 @@ private:
     int32_t n_swa;
 
     // slots / clients
-    std::vector<server_slot> slots;
+    std::vector<server_slot> slots;  // 并发
 
     int trace = 0;        // env: LLAMA_TRACE
     int slots_debug = 0;  // env: LLAMA_SERVER_SLOTS_DEBUG
@@ -1726,6 +1726,10 @@ private:
         size_t alora_invocation_start = task.tokens.size();
         if (lora_all_alora(slot.lora)) {
             const auto & enabled_ids = lora_get_enabled_ids(slot.lora);
+            // TODO: This will error out if a user requests two aloras, but only
+            // provides the activation string for one. We could, instead search
+            // for all requested alora activation strings and then either keep
+            // only the last one, or reject if multiple are found.
             // TODO: This will error out if a user requests two aloras, but only
             // provides the activation string for one. We could, instead search
             // for all requested alora activation strings and then either keep
@@ -3226,6 +3230,7 @@ private:
 
                                 const auto n_cache_reuse = slot.task->params.n_cache_reuse;
 
+                                // 检查硬件是否支持 RoPE 位置平移以及是否非多模态数据（多模态数据肯定不支持）
                                 const bool can_cache_reuse =
                                     llama_memory_can_shift(llama_get_memory(ctx_tgt)) &&
                                     !slot.prompt.tokens.has_mtmd;
@@ -3252,6 +3257,7 @@ private:
                                            head_p < input_tokens.size()) {
 
                                         size_t n_match = 0;
+                                        // 从之前相同的 token 开始匹配，往后一直计算看看还有多少个词是一模一样的
                                         while (head_c + n_match < slot.prompt.tokens.size() &&
                                                head_p + n_match < input_tokens.size()       &&
                                                slot.prompt.tokens[head_c + n_match] == input_tokens[head_p + n_match]) {
@@ -3264,6 +3270,9 @@ private:
                                             //    SLT_DBG(slot, "cache token %3zu: %6d '%s'\n", i, prompt_tokens[i], common_token_to_piece(ctx_tgt, prompt_tokens[i]).c_str());
                                             //}
 
+                                            //for (size_t i = head_p; i < head_p + n_match; i++) {
+                                            //    SLT_DBG(slot, "cache token %3zu: %6d '%s'\n", i, prompt_tokens[i], common_token_to_piece(ctx, prompt_tokens[i]).c_str());
+                                            //}
                                             const int64_t kv_shift = (int64_t) head_p - (int64_t) head_c;
 
                                             slot.mem.seq_rm (slot.id, head_p, head_c);
@@ -3387,6 +3396,7 @@ private:
 
                             {
                                 // erase any checkpoints with pos_max > pos_next
+                                // erase any checkpoints with pos_min > pos_min_thold
                                 for (auto it = slot.prompt.checkpoints.begin(); it != slot.prompt.checkpoints.end();) {
                                     const auto & cur = *it;
                                     if (cur.pos_max > pos_next) {
@@ -3490,6 +3500,7 @@ private:
                         metrics_pre_decode();
 
                         // encode on the worker thread, so we can still handle metrics tasks
+                        // process the image
                         size_t n_tokens_out = 0;
                         int32_t res = 0;
                         queue_tasks.yield_to_queue([&]() {
@@ -3804,6 +3815,8 @@ private:
 
         iterate(slots, [&](server_slot & slot) {
             // optionally send prompt processing progress
+            // optionally send prompt processing progress
+            // 显示进度条的
             if (slot.state == SLOT_STATE_PROCESSING_PROMPT || slot.state == SLOT_STATE_DONE_PROMPT) {
                 if (slot.task->params.stream && slot.task->params.return_progress) {
                     send_partial_response(slot, {}, true);
@@ -3816,6 +3829,7 @@ private:
             }
 
             if (slot.state == SLOT_STATE_DONE_PROMPT) {
+                // 针对非文本生成任务 embedding 任务的
                 if (slot.task->type == SERVER_TASK_TYPE_EMBEDDING) {
                     // prompt evaluated for embedding
                     send_embedding(slot, batch_view);
@@ -4289,6 +4303,9 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         }
 
         // process prompt
+        // TODO: this log can become very long, put it behind a flag or think about a more compact format
+        //SRV_DBG("Prompt: %s\n", prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
+        // process prompt
         std::vector<server_tokens> inputs;
 
         if (res_type != TASK_RESPONSE_TYPE_NONE && ctx_server.mctx != nullptr) {
@@ -4307,6 +4324,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         delimiters.tokenize(ctx_server.vocab);
 
         for (size_t i = 0; i < inputs.size(); i++) {
+            // 创建新的推理任务
             server_task task = server_task(type);
 
             task.id = rd.get_new_id();

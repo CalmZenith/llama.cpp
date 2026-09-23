@@ -476,6 +476,7 @@ std::string string_lcs(std::string_view a, std::string_view b) {
 
     for (size_t i = 1; i <= a.size(); ++i) {
         for (size_t j = 1; j <= b.size(); ++j) {
+            // if elements at the current positions match
             if (a[i - 1] == b[j - 1]) {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
                 if (dp[i][j] > best_len) {
@@ -1958,6 +1959,7 @@ void common_embd_normalize(const float * inp, float * out, int n, int embd_norm)
             }
             sum = std::sqrt(sum);
             break;
+        // fall through
         default: // p-norm (euclidean is p-norm p=2)
             for (int i = 0; i < n; i++) {
                 sum += std::pow(std::abs(inp[i]), embd_norm);

@@ -128,10 +128,10 @@ struct common_chat_msg {
 };
 
 struct common_chat_msg_diff {
-    std::string           reasoning_content_delta;
-    std::string           content_delta;
-    size_t                tool_call_index = std::string::npos;
-    common_chat_tool_call tool_call_delta;
+    std::string           reasoning_content_delta;  // 思考过程增量
+    std::string           content_delta;  // 回答内容增量
+    size_t                tool_call_index = std::string::npos;  // 工具调用索引
+    common_chat_tool_call tool_call_delta;  // 工具调用增量
 
     static std::vector<common_chat_msg_diff> compute_diffs(const common_chat_msg & msg_prv,
                                                            const common_chat_msg & msg_new);
@@ -288,13 +288,13 @@ struct common_chat_parser_params {
     common_chat_format      format               = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     common_reasoning_format reasoning_format     = COMMON_REASONING_FORMAT_NONE; // TODO: refactor this to "bool parse_reasoning"
     // Whether reasoning_content should be inlined in the content (e.g. for reasoning_format=deepseek in stream mode)
-    bool                    reasoning_in_content = false;
+    bool                    reasoning_in_content = false;  // 思考内容是否混入正文
     std::string             generation_prompt;
-    bool                    parse_tool_calls     = true;
+    bool                    parse_tool_calls     = true;  // 是否解析工具调用
     bool                    is_continuation      = false;
     bool                    echo                 = false;  // Include assistant prefilled msg in output
     bool                    debug                = false;  // Enable debug output for PEG parser
-    common_peg_arena        parser               = {};
+    common_peg_arena        parser               = {};  // PEG 解析器
     common_chat_parser_params() = default;
     common_chat_parser_params(const common_chat_params & chat_params) {
         format  = chat_params.format;

@@ -287,6 +287,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
 
     // if using single GPU mode, remove all except the main GPU
     if (params.split_mode == LLAMA_SPLIT_MODE_NONE && !model->devices.empty()) {
+        // main_gpu 是负数（通常是 -1），意味着用户想强制使用 CPU 运行。
         if (params.main_gpu < 0) {
             model->devices.clear();
         } else {
@@ -426,6 +427,9 @@ static struct llama_model * llama_model_load_from_file_impl(
     }
 
     const auto [status, model] = llama_model_load(metadata, set_tensor_data, set_tensor_data_ud, path_model, splits, file, params);
+    // 0: 加载成功，一切正常
+    // -1: 加载失败，通常是文件找不到、格式错误或显存不足
+    // -2: 加载被取消（例如用户按下了 Ctrl+C）
     GGML_ASSERT(status <= 0);
     if (status < 0) {
         if (status == -1) {

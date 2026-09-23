@@ -80,10 +80,10 @@ struct llm_tokenizer {
 
 struct llm_symbol {
     using index = int;
-    index prev;
-    index next;
-    const char * text;
-    size_t n;
+    index prev;  // 前一个 symbol 的索引
+    index next;  // 后一个 symbol 的索引
+    const char * text;  // symbol 的文本，指向【原始字符串】中该字符开始位置的指针
+    size_t n;  // symbol 的长度，该字符占用了多少个字节（比如英文 1，中文 3）
 };
 
 static_assert(std::is_trivially_copyable<llm_symbol>::value, "llm_symbol is not trivially copyable");
@@ -96,15 +96,17 @@ static_assert(std::is_trivially_copyable<llm_symbol>::value, "llm_symbol is not 
 
 struct llm_bigram_spm {
     struct comparator {
+        // 1. 先比分数：谁的分数 (Score) 更高，谁就排在前面
+        // 2. 如果分数一样：谁在句子里的位置更靠前 (left 更小)，谁就排在前面
         bool operator()(llm_bigram_spm & l, llm_bigram_spm & r) {
             return (l.score < r.score) || (l.score == r.score && l.left > r.left);
         }
     };
-    using queue_storage = std::vector<llm_bigram_spm>;
-    using queue = std::priority_queue<llm_bigram_spm, queue_storage, comparator>;
+    using queue_storage = std::vector<llm_bigram_spm>;  // 存储 bigram 的容器
+    using queue = std::priority_queue<llm_bigram_spm, queue_storage, comparator>;  // 优先队列
     llm_symbol::index left;
     llm_symbol::index right;
-    float score;
+    float score;  // bigram 的分数
     size_t size;
 };
 
@@ -122,11 +124,11 @@ struct llm_tokenizer_spm_session {
         while (offs < text.size()) {
             llm_symbol sym;
             size_t len = unicode_len_utf8(text[offs]);
-            sym.text = text.c_str() + offs;
-            sym.n = std::min(len, text.size() - offs);
+            sym.text = text.c_str() + offs;  // 指向当前字符在原始字符串中的位置
+            sym.n = std::min(len, text.size() - offs);  // 实际长度，防止越界
             offs += sym.n;
             sym.prev = index - 1;
-            sym.next = offs == text.size() ? -1 : index + 1;
+            sym.next = offs == text.size() ? -1 : index + 1;  // 后一个 symbol 的索引
             index++;
             symbols.emplace_back(sym);
         }
@@ -188,6 +190,8 @@ private:
 
         if (p == rev_merge.end()) {
             // output any symbols that did not form tokens as bytes.
+            // output any symbols that did not form tokens as bytes.
+            // 将这个无法识别的 Symbol 拆解成单个字节，并逐个转换成 Token 加入输出列表。
             output.reserve(output.size() + symbol.n);
             for (int j = 0; j < (int)symbol.n; ++j) {
                 llama_token id = vocab.byte_to_token(symbol.text[j]);
@@ -234,8 +238,8 @@ private:
     // const llm_tokenizer_spm * spm_tokenizer;
 
     std::vector<llm_symbol> symbols;
-    llm_bigram_spm::queue work_queue;
-    std::map<std::string, std::pair<int, int>> rev_merge;
+    llm_bigram_spm::queue work_queue;  // 待合并的 bigram 队列
+    std::map<std::string, std::pair<int, int>> rev_merge;  // 合并后的 bigram 映射
 };
 
 //
@@ -269,11 +273,14 @@ struct llm_bigram_bpe {
     };
 
     using queue_storage = std::vector<llm_bigram_bpe>;
+    // std::priority_queue 默认是一个大顶堆，它会把“比较结果为 False”的那个元素推到顶端。
+    // Rank 值越小的二元组，在堆里的优先级反而越高。
+    // 如果两个合并项的 Rank 一样大，那就看 left（即位置）。位置越靠前的（left 越小的），优先级越高。
     using queue = llama_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
     llm_symbol::index left;
     llm_symbol::index right;
     std::string text;
-    int rank;
+    int rank;  // 优先级
     size_t size;
 };
 
@@ -617,14 +624,16 @@ struct llm_tokenizer_bpe_session {
     }
 
     virtual void tokenize(const std::string & text, std::vector<llama_token> & output) {
-        int final_prev_index = -1;
+        int final_prev_index = -1;  // 记录上一个 Token 最后字符的索引，用于构建双向链表
         const auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);
 
         symbols_final.clear();
         auto tok_pre = vocab.get_pre_type();
 
         for (const auto & word : word_collection) {
+            // 创建了一个 llm_bigram_bpe 类型的优先队列，改变了比较器，实际是个小顶堆
             work_queue = llm_bigram_bpe::queue();
+            // 存储当前词块中的所有字符（或已合并的子词）
             symbols.clear();
 
             int index = 0;
@@ -645,6 +654,7 @@ struct llm_tokenizer_bpe_session {
 
             while (offset < word.size()) {
                 llm_symbol sym;
+                // unicode_len_utf8 函数根据 UTF-8 编码规则，预估这个字符应该占多少字节。
                 size_t char_len = std::min(word.size() - offset, (size_t) unicode_len_utf8(word[offset]));
                 sym.text = word.c_str() + offset;
                 sym.n = char_len;
@@ -670,6 +680,12 @@ struct llm_tokenizer_bpe_session {
                 }
                 std::string left_token = std::string(left_symbol.text, left_symbol.n);
                 std::string right_token = std::string(right_symbol.text, right_symbol.n);
+                // 这一步的例子，假设w ork_queue 里有两个并行的申请单：
+                // 申请单 A：索引为（0，1）内容是 "a"+"p"
+                // 申请单 B：索引为（1，2）内容是 "p"+"p"
+                // 申请单 B (1, 2) 的 Rank 更好，它被先执行了，结果是索引1变成了“pp”
+                // 此时执行执行申请单 A (0, 1)，symbols[0] 的 n 是 1（没变），symbols[1]的 n 是 2（它合并了别人条件1没能拦住它）。
+                // 但是条件2 "a"+"pp" != "ap"，所以申请单 A 被拒绝了。
                 if (left_token + right_token != bigram.text) {
                     continue;  // Skip this bigram if it's outdated
                 }
@@ -702,6 +718,7 @@ struct llm_tokenizer_bpe_session {
             }
         }
 
+        // 到此为止，symbols_final 数组里装的就是整个输入文本经过所有正则切分、字符变装和 BPE 贪婪合并后的最终词块序列。
         symbols = symbols_final;
 
         if (!symbols.empty()) {
@@ -743,6 +760,7 @@ private:
         if (left == -1 || right == -1) {
             return;
         }
+        // 根据传入的两个索引（左邻和右里），把它们代表的字符串实体（比如 "a" 和 "p"）给挖出来。
         std::string left_token  = std::string(symbols[left].text,  symbols[left].n);
         std::string right_token = std::string(symbols[right].text, symbols[right].n);
 
@@ -1761,8 +1779,8 @@ private:
 //
 
 typedef enum FRAGMENT_BUFFER_VARIANT_TYPE {
-    FRAGMENT_BUFFER_VARIANT_TYPE_TOKEN,
-    FRAGMENT_BUFFER_VARIANT_TYPE_RAW_TEXT
+    FRAGMENT_BUFFER_VARIANT_TYPE_TOKEN,  // Token ID
+    FRAGMENT_BUFFER_VARIANT_TYPE_RAW_TEXT  // 原始文本
 } FRAGMENT_BUFFER_VARIANT_TYPE;
 
 struct fragment_buffer_variant {
@@ -1786,21 +1804,22 @@ struct fragment_buffer_variant {
             GGML_ASSERT(offset + length <= raw_text.length());
         }
 
-    const FRAGMENT_BUFFER_VARIANT_TYPE type;
-    const llama_token token;
-    const std::string _dummy;
-    const std::string & raw_text;
-    const uint64_t offset;
-    const uint64_t length;
+    const FRAGMENT_BUFFER_VARIANT_TYPE type;  // 标记是 Token ID 还是原始文本
+    const llama_token token;  // Token ID，记录这个碎片已经被转换成的具体物理 ID
+    const std::string _dummy;  // 占位符，仅仅是为了让构造函数里的引用初始化合法化
+    const std::string & raw_text;  // 原始文本，指向的是最开始的 raw_text 字符串
+    const uint64_t offset;  // 偏移量，标记当前这个碎片的起点，在 raw_text 中是从第几个字符开始的
+    const uint64_t length;  // 长度，从 offset 开始，往后数多少个字符属于这一个碎片
 };
 
 struct llama_vocab::impl {
+    // 定义了模型一共支持多少种不同的“段类型”，是用来区分 “第一句话” 和 “第二句话” 的。
     uint32_t n_token_types = 0; // for BERT-style token types
 
-    std::string tokenizer_model;
+    std::string tokenizer_model;  // 分词算法名称，llama 会通过比对这个字符串，来决定内部到底该调用哪一套代码来加载词表权重。
     std::string tokenizer_pre;
 
-    enum llama_vocab_type     type     = LLAMA_VOCAB_TYPE_SPM;
+    enum llama_vocab_type     type     = LLAMA_VOCAB_TYPE_SPM;  // SentencePiece
     enum llama_vocab_pre_type pre_type = LLAMA_VOCAB_PRE_TYPE_DEFAULT;
 
     int max_token_len = 0; // used for optimizing longest token search
@@ -1816,7 +1835,7 @@ struct llama_vocab::impl {
     llama_token special_pad_id  = LLAMA_TOKEN_NULL;
     llama_token special_mask_id = LLAMA_TOKEN_NULL;
 
-    llama_token linefeed_id = 13;
+    llama_token linefeed_id = 13;  // \n 换行对应的 ID
 
     // fim tokens
     llama_token special_fim_pre_id = LLAMA_TOKEN_NULL;
@@ -1827,15 +1846,15 @@ struct llama_vocab::impl {
     llama_token special_fim_sep_id = LLAMA_TOKEN_NULL; // file separator
 
     // tokenizer flags
-    bool add_space_prefix           = false;
-    bool add_bos                    = false;
-    bool add_eos                    = false;
-    bool add_sep                    = false;
-    bool ignore_merges              = false;
-    bool clean_spaces               = false;  // clean_up_tokenization_spaces
-    bool remove_extra_whitespaces   = false;
-    bool escape_whitespaces         = true;
-    bool treat_whitespace_as_suffix = false;
+    bool add_space_prefix           = false;  // 添加空格前缀
+    bool add_bos                    = false;  // 决定是否在每次分词时添加 bos
+    bool add_eos                    = false;  // 决定是否在每次分词时添加 eos
+    bool add_sep                    = false;  // 决定是否在每次分词时添加 sep
+    bool ignore_merges              = false;  // 忽略合并
+    bool clean_spaces               = false;  // 清理空格，detokenize拼回文字时处理标点符号前后的多余空格（比如把 "don 't" 优化成 "don't"）。
+    bool remove_extra_whitespaces   = false;  // 移除多余的空格
+    bool escape_whitespaces         = true;  // 转义空格
+    bool treat_whitespace_as_suffix = false;  // 将空格视为后缀
 
     // BertNormalizer options
     llama_vocab::normalizer_options normalizer_opts;
@@ -1843,8 +1862,8 @@ struct llama_vocab::impl {
     std::unordered_map<std::string, llama_token> token_to_id;
     std::vector<token_data>                      id_to_token;
 
-    std::vector<llama_token> cache_special_tokens;
-    std::vector<std::string> cache_token_to_piece; // llama_token_to_piece(special = true);
+    std::vector<llama_token> cache_special_tokens;  // 特殊符号缓存，存放所有特殊符号的ID
+    std::vector<std::string> cache_token_to_piece;  // llama_token_to_piece(special = true),ID to 文字
     struct pair_hash {
         size_t operator()(const std::pair<std::string, std::string> & p) const {
             return std::hash<std::string>{}(p.first) ^  //create some hash for pair
@@ -2062,6 +2081,7 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
                 if (precompiled_charsmap.size() < sizeof(uint32_t)) {
                     throw std::runtime_error("precompiled_charsmap too small for xcda_blob_size header!");
                 }
+                // correct endiannes of data in precompiled_charsmap binary blob
                 uint32_t * xcda_blob_size = (uint32_t *) &precompiled_charsmap[0];
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
                 *xcda_blob_size = __builtin_bswap32(*xcda_blob_size);
@@ -3250,6 +3270,7 @@ void llama_vocab::impl::init_tokenizer(enum llama_vocab_type type) {
 void llama_vocab::impl::tokenizer_st_partition(std::forward_list<fragment_buffer_variant> & buffer, bool parse_special) const {
     // for each special token
     for (const llama_token special_id : cache_special_tokens) {
+        // 返回的 data 是一个包含 text、score、attr 的结构体
         const auto & data = vocab.get_token_data(special_id);
         const auto & text = data.text;
 
@@ -3417,6 +3438,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
     GGML_ASSERT(tokenizer && "Tokenizer not initialized. Call llama_vocab::init_tokenizer() first.");
 
     std::vector<llama_token> output;
+    // 用来存放待处理的文本片段（可能是原始字符串，也可能是已经分好的 Token）
     std::forward_list<fragment_buffer_variant> fragment_buffer;
 
     if (!raw_text.empty()) {
@@ -3432,6 +3454,11 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                 // tokenizer.encode('', add_special_tokens=True)  returns [1]
                 // tokenizer.encode('', add_special_tokens=False) returns []
 
+                // OG tokenizer behavior:
+                //
+                // tokenizer.encode('', add_special_tokens=True)  returns [1]
+                // tokenizer.encode('', add_special_tokens=False) returns []
+                // 标记前一个 token 是否是特殊 token
                 bool is_prev_special = true;  // prefix with space if first token
 
                 if (add_special && add_bos) {
@@ -3645,6 +3672,7 @@ std::vector<llama_token> llama_vocab::impl::tokenize(
                     }
                 }
             } break;
+        // 如果是 NONE 类型
         case LLAMA_VOCAB_TYPE_NONE:
             GGML_ABORT("fatal error");
     }
@@ -4211,7 +4239,9 @@ int32_t llama_vocab::tokenize(
                      int32_t   n_tokens_max,
                         bool   add_special,
                         bool   parse_special) const {
+    // 调用内部的 tokenize 函数，函数会返回一个 std::vector<llama_token>，里面装满了分好的 Token。
     auto res = tokenize(std::string(text, text_len), add_special, parse_special);
+    // 如果 Token 数量超过 int32_t 的最大值，记录错误并返回最小值
     if (res.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
         LLAMA_LOG_ERROR("%s: tokenization result size %zu exceeds int32_t limit\n", __func__, res.size());
         return std::numeric_limits<int32_t>::min();

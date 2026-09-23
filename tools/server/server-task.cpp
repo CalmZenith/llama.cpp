@@ -303,6 +303,7 @@ json completion_token_output::probs_vector_to_json(const std::vector<completion_
 
 float completion_token_output::logarithm(float x) {
     // the JSON library converts -inf to null, so we need to prevent that
+    // nlohmann::json converts -inf to null, so we need to prevent that
     return x == 0.0f ? std::numeric_limits<float>::lowest() : std::log(x);
 }
 

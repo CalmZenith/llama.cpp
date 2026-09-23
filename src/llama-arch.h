@@ -531,7 +531,7 @@ enum llm_tensor {
     LLM_TENSOR_SSM_CONV1D_V,        // kimi: V conv1d weight
     LLM_TENSOR_SSM_F_A,             // kimi: forget gate projection A
     LLM_TENSOR_SSM_F_B,             // kimi: forget gate projection B
-    LLM_TENSOR_SSM_BETA,            // kimi: beta mixing coefficient and qwen3.5
+    LLM_TENSOR_SSM_BETA,  // kimi: beta mixing coefficient
     LLM_TENSOR_SSM_G_A,             // kimi: output gate projection A
     LLM_TENSOR_SSM_G_B,             // kimi: output gate projection B
     LLM_TENSOR_SSM_G,               // kimi-k3: full-rank KDA gate
@@ -724,7 +724,7 @@ struct LLM_KV {
     LLM_KV(llm_arch arch, const char * suffix = nullptr);
 
     llm_arch arch;
-    const char * suffix;
+    const char * suffix;  // 可选后缀
 
     std::string operator()(llm_kv kv) const;
 };

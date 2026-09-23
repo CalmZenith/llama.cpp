@@ -163,18 +163,28 @@ extern "C" {
         // device name
         const char * name;
         // device description
+        // device description 设备描述，通常包含更具体的信息，比如驱动版本号、后端架构（CUDA/Metal）等详细字符串
         const char * description;
         // device free memory in bytes
+        // device free memory in bytes 当前可用显存/内存（单位：字节），动态变化的
         size_t memory_free;
         // device total memory in bytes
+        // device total memory in bytes 总显存/内存容量（单位：字节）
         size_t memory_total;
         // device type
+        // device type 设备类型，即之前的 CPU、GPU（独立显存）、IGPU（集成显存）或 ACCEL（加速单元）
         enum ggml_backend_dev_type type;
         // device id
         //   for PCI devices, this should be the lower-case PCI bus id formatted as "domain:bus:device.function" (e.g. "0000:c1:00.0")
         //   if the id is unknown, this should be NULL
+        // device id
+        //   for PCI devices, this should be the PCI bus id formatted as "domain:bus:device.function" (e.g. "0000:01:00.0")
+        //   if the id is unknown, this should be NULL
+        // 硬件唯一标识码，这是防重复的核心。对于PCI 设备：通常格式为 0000:01:00.0（总线编号）。
+        // 如果系统同时通过 CUDA 和 Vulkan 发现了同一块显卡，它们的 name 可能略有不同，但 device_id 物理上是相同的。程序靠它来识别“这其实是同一块卡”。
         const char * device_id;
         // device capabilities
+        // device capabilities 设备支持的功能集合，是一个嵌套结构体，用来描述该设备支持的具体功能（比如：是否支持半精度浮点 FP16、是否支持某些特定的数学运算算子等）。
         struct ggml_backend_dev_caps caps;
     };
 

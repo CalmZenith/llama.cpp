@@ -6,6 +6,7 @@
 
 // TODO: reimplement this structure in endian-independent way
 struct unicode_cpt_flags {
+    // 位掩码，和下面的 12 + 1 对应
     enum {
         UNDEFINED       = 0x0001,
         NUMBER          = 0x0002,  // regex: \p{N}
@@ -32,6 +33,8 @@ struct unicode_cpt_flags {
     uint16_t is_symbol      : 1;  // regex: \p{S}
     uint16_t is_control     : 1;  // regex: \p{C}
     // helper flags
+    // helper flags
+    // 辅助状态
     uint16_t is_whitespace  : 1;  // regex: \s
     uint16_t is_lowercase   : 1;
     uint16_t is_uppercase   : 1;

@@ -311,6 +311,8 @@ bool server_http_context::init_listener(const common_params & params) {
             }
             // no endpoints are allowed to be accessed when the server is not ready
             // this is to prevent any data races or inconsistent states
+            // no endpoints is allowed to be accessed when the server is not ready
+            // this is to prevent any data races or inconsistent states
             res.status = 503;
             res.set_content(
                 safe_json_to_str(json {
@@ -418,6 +420,7 @@ bool server_http_context::init_listener(const common_params & params) {
                         return false;
                     }
                     if (isolation) {
+                        // COEP and COOP headers, required by pyodide (python interpreter)
                         res.set_header("Cross-Origin-Embedder-Policy", "require-corp");
                         res.set_header("Cross-Origin-Opener-Policy",   "same-origin");
                     }
@@ -516,6 +519,7 @@ bool server_http_context::start() {
                 SRV_ERR("listener on %s stopped unexpectedly\n", addr.c_str());
             }
         });
+        // 等待服务准备好
         srv->wait_until_ready();
         if (!srv->is_running()) {
             SRV_ERR("couldn't start HTTP listener on %s\n", listening_addresses[i].c_str());
@@ -643,8 +647,8 @@ static void process_handler_response(server_http_req_ptr && request, server_http
         };
         const auto on_complete = [request = q_ptr, response = r_ptr](bool) mutable {
             response->on_complete();
-            response.reset();
-            request.reset();
+            response.reset();  // trigger the destruction of the response object
+            request.reset();  // trigger the destruction of the request object
         };
         res.set_chunked_content_provider(content_type, chunked_content_provider, on_complete);
     } else {

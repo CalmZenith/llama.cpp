@@ -100,17 +100,17 @@ extern "C" {
     };
 
     enum llama_token_attr {
-        LLAMA_TOKEN_ATTR_UNDEFINED    = 0,
-        LLAMA_TOKEN_ATTR_UNKNOWN      = 1 << 0,
-        LLAMA_TOKEN_ATTR_UNUSED       = 1 << 1,
-        LLAMA_TOKEN_ATTR_NORMAL       = 1 << 2,
-        LLAMA_TOKEN_ATTR_CONTROL      = 1 << 3,  // SPECIAL?
-        LLAMA_TOKEN_ATTR_USER_DEFINED = 1 << 4,
-        LLAMA_TOKEN_ATTR_BYTE         = 1 << 5,
-        LLAMA_TOKEN_ATTR_NORMALIZED   = 1 << 6,
-        LLAMA_TOKEN_ATTR_LSTRIP       = 1 << 7,
-        LLAMA_TOKEN_ATTR_RSTRIP       = 1 << 8,
-        LLAMA_TOKEN_ATTR_SINGLE_WORD  = 1 << 9,
+        LLAMA_TOKEN_ATTR_UNDEFINED    = 0,  // 默认
+        LLAMA_TOKEN_ATTR_UNKNOWN      = 1 << 0,  // 未知
+        LLAMA_TOKEN_ATTR_UNUSED       = 1 << 1,  // 未使用的（有对应的id，但是当前模型版本不打算使用）
+        LLAMA_TOKEN_ATTR_NORMAL       = 1 << 2,  // 常见的普通词汇
+        LLAMA_TOKEN_ATTR_CONTROL      = 1 << 3,  // SPECIAL? 控制字符如 BOS
+        LLAMA_TOKEN_ATTR_USER_DEFINED = 1 << 4,  // 用户自定义的词汇
+        LLAMA_TOKEN_ATTR_BYTE         = 1 << 5,  // 原始字节（一个词被拆的太碎，碎到连最小的词都凑不齐，就会退化为原始字节）
+        LLAMA_TOKEN_ATTR_NORMALIZED   = 1 << 6,  // 表示该 Token 已经经过了 Unicode 标准化（比如把“é”统一化处理过）。
+        LLAMA_TOKEN_ATTR_LSTRIP       = 1 << 7,  // 左侧有空格
+        LLAMA_TOKEN_ATTR_RSTRIP       = 1 << 8,  // 右侧有空格
+        LLAMA_TOKEN_ATTR_SINGLE_WORD  = 1 << 9,  // 单个词（该 token 本身已经构成一个完整的词，不需要合并）
     };
 
     // model file types
@@ -165,32 +165,54 @@ extern "C" {
     LLAMA_API const char * llama_ftype_name(enum llama_ftype ftype);
 
     enum llama_rope_scaling_type {
+        // 自动分配，根据模型文件中的设定来决定
         LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED = -1,
+        // 不缩放，默认状态。模型原本能读多少字，就读多少字。不进行任何数学变形。
         LLAMA_ROPE_SCALING_TYPE_NONE        = 0,
+        // 线性缩放。简单粗暴地把位置编码拉长。比如原本只能读 2000 字，线性缩放后能读 4000 字。
         LLAMA_ROPE_SCALING_TYPE_LINEAR      = 1,
+        // YaRN 缩放。比线性更智能一点，它会根据词的位置调整缩放比例，尽量保持远距离词的相对位置关系。
         LLAMA_ROPE_SCALING_TYPE_YARN        = 2,
+        // LongRoPE 缩放。目前最强的长上下文方案之一，通过修改旋转角度，让模型在超长距离下依然保持较好的性能。
         LLAMA_ROPE_SCALING_TYPE_LONGROPE    = 3,
+        // 最大值，它永远等于当前代码支持的最后一种（即最新的）算法（目前它等于 LONGROPE）。
         LLAMA_ROPE_SCALING_TYPE_MAX_VALUE   = LLAMA_ROPE_SCALING_TYPE_LONGROPE,
     };
 
     enum llama_pooling_type {
+        // 自动分配，根据模型文件中的设定来决定
         LLAMA_POOLING_TYPE_UNSPECIFIED = -1,
+        // 不池化，默认状态。模型原本能读多少字，就读多少字。不进行任何数学变形。
         LLAMA_POOLING_TYPE_NONE = 0,
+        // 平均池化，把所有词的向量取平均值。就像把尺子上的刻度画得更密，从而在同样长的尺子上量出更多的数值。
         LLAMA_POOLING_TYPE_MEAN = 1,
+        // CLS 池化，只看最后一个词。就像把尺子上的刻度画得更密，从而在同样长的尺子上量出更多的数值。
         LLAMA_POOLING_TYPE_CLS  = 2,
+        // Last 池化，也是只看最后一个词。
         LLAMA_POOLING_TYPE_LAST = 3,
+        // 用于重排模型附加分类头到图
+        // 这种模型不生成新字，而是给两个句子的相关性 “打分”。它会在计算图上挂一个“分类头”，专门用来输出一个得分数值。
         LLAMA_POOLING_TYPE_RANK = 4, // used by reranking models to attach the classification head to the graph
     };
 
     enum llama_attention_type {
+        // 默认选项，根据模型文件中的设定来决定
         LLAMA_ATTENTION_TYPE_UNSPECIFIED = -1,
+        // 因果（单向）注意力，只能回头看，不能预知未来
+        // 你正在写第 5 个字时，模型只能看到前 4 个字。它绝对看不到第 6 个及以后的字。
         LLAMA_ATTENTION_TYPE_CAUSAL      = 0,
+        // 非因果（双向）注意力，可以看到未来
+        // 你正在写第 5 个字时，模型不仅能看到前 4 个字，还能看到第 6 个及以后的字。
         LLAMA_ATTENTION_TYPE_NON_CAUSAL  = 1,
     };
 
     enum llama_flash_attn_type {
+        // 默认推荐。程序会检测你的硬件（比如是 NVIDIA 显卡还是苹果 M 芯片），
+        // 如果硬件支持这个加速特性，它就自动打开；如果不支持，就退回到普通计算模式。
         LLAMA_FLASH_ATTN_TYPE_AUTO     = -1,
+        // 强制关闭 Flash Attention。这会降低速度，但能避免某些硬件或驱动下的兼容性问题。
         LLAMA_FLASH_ATTN_TYPE_DISABLED = 0,
+        // 强制打开 Flash Attention。如果你的硬件不支持，程序可能会报错或崩溃。
         LLAMA_FLASH_ATTN_TYPE_ENABLED  = 1,
     };
 
@@ -261,13 +283,13 @@ extern "C" {
     //            )
     //
     typedef struct llama_batch {
-        int32_t n_tokens;
+        int32_t n_tokens;  // 总共有多少个 token
 
-        llama_token  *  token;
-        float        *  embd;
-        llama_pos    *  pos;
-        int32_t      *  n_seq_id;
-        llama_seq_id ** seq_id;
+        llama_token  *  token;  // token id 数组
+        float        *  embd;  // token embedding 数组
+        llama_pos    *  pos;  // token position 数组
+        int32_t      *  n_seq_id;  // 每个 token 对应的序列 id 数量
+        llama_seq_id ** seq_id;  // 每个 token 对应的序列 id
         int8_t       *  logits;   // TODO: rename this to "output"
     } llama_batch;
 
@@ -313,12 +335,14 @@ extern "C" {
 
     struct llama_model_params {
         // NULL-terminated list of devices to use for offloading (if NULL, all available devices are used)
+        // 控制具体使用哪些张量计算设备，是个双重数组（可以指定使用第几个），NULL默认有多少用多少
         ggml_backend_dev_t * devices;
 
         // NULL-terminated list of buffer types to use for tensors that match a pattern
         const struct llama_model_tensor_buft_override * tensor_buft_overrides;
 
         int32_t n_gpu_layers; // number of layers to store in VRAM, a negative value means all layers
+        // 多卡并行模式。针对拥有多张 GPU 的服务器，定义一张卡装不下时怎么切分模型。
         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
         enum llama_load_mode  load_mode;  // how to load the model
 
@@ -343,6 +367,8 @@ extern "C" {
 
         // Keep the booleans together to avoid misalignment during copy-by-value.
         bool vocab_only;      // only load the vocabulary, no weights
+        // validate model tensor data
+        // 启动前进行文件完整性校验。模型下载断流了？校验一下防止运行时爆出段错误退出。
         bool check_tensors;   // validate model tensor data
         bool use_extra_bufts; // use extra buffer types (used for weight repacking)
         bool no_host;         // bypass host buffer allowing extra buffers to be used
@@ -358,33 +384,58 @@ extern "C" {
     // NOTE: changing the default values of parameters marked as [EXPERIMENTAL] may cause crashes or incorrect results in certain configurations
     //       https://github.com/ggml-org/llama.cpp/pull/7544
     struct llama_context_params {
+        // 记忆长度（上下文窗口大小）。模型一次能同时“看见”并记住的 Token 总量。
+        // 如果设为 4096，那么模型在生成第 4097 个词时，就会开始忘记最开头的词。
         uint32_t n_ctx;                 // text context, 0 = from model
+        // 一次最多能处理多少个 Token（批处理大小）。逻辑批处理大小，在一次 llama_decode 调用中，最多能塞进去多少个 Token。
         uint32_t n_batch;               // logical maximum batch size that can be submitted to llama_decode
+        // 物理批处理大小，实际分配的内存能处理的最大 Token 数，
+        // 通常 n_ubatch 会小于或等于 n_batch。它把逻辑上的大批次拆成更碎的物理块，目的是为了节省计算过程中的中间内存。
         uint32_t n_ubatch;              // physical maximum batch size
+        // 最大并行序列数，在一个 Context 里，可以同时处理多少个独立的对话
+        // 对于普通的单人聊天，这个值为 1。对于聊天机器人服务器，可以通过增加这个值来在同一个 KV 缓存里管理多个人的对话状态。
         uint32_t n_seq_max;             // max number of sequences (i.e. distinct states for recurrent models)
         uint32_t n_rs_seq;              // number of recurrent-state snapshots per seq for rollback (0 = no rollback) [EXPERIMENTAL]
         uint32_t n_outputs_max;         // max outputs in a ubatch (0 = n_batch)
         uint32_t n_outputs_max_per_seq; // max outputs per sequence (0 = n_outputs_max)
+        // 用于生成推理的线程数，通常设为 CPU 核心数的一半或全部
         int32_t  n_threads;             // number of threads to use for generation
+        // 用于批处理的线程数，在处理开头那一长串 Prompt（Batch processing）时，使用的 CPU 线程数。通常设为 CPU 核心数的一半或全部。
         int32_t  n_threads_batch;       // number of threads to use for batch processing
 
         enum llama_context_type      ctx_type;          // set the context type (e.g. MTP)
         enum llama_rope_scaling_type rope_scaling_type; // RoPE scaling type, from `enum llama_rope_scaling_type`
+        // 词嵌入池化类型，决定如何将多个词的向量合并成一个表示。0 表示使用模型默认设置。
+        // 通俗解释：模型算完后，每个字都有一个向量。pooling 决定了怎么把这几千个字的向量合成一个代表全篇意义的向量。
+        // 比如是取平均值（Average）、求和（Sum），还是只看最后一个字。
         enum llama_pooling_type      pooling_type;      // whether to pool (sum) embedding results by sequence id
+        // 注意力类型，决定如何计算注意力。0 表示使用模型默认设置。
+        // 通俗解释：决定了模型在处理一个词时，应该“看”前面多少个词。比如是看前 10 个词（Local），还是看所有词（Full）。
         enum llama_attention_type    attention_type;    // attention type to use for embeddings
+        // Flash Attention 类型，决定何时启用 Flash Attention。0 表示使用模型默认设置。
+        // 通俗解释：这是一种专门针对 GPU 优化的加速算法。如果你的显卡支持（NVIDIA 较新型号基本都支持），开启它能让模型算得飞快，同时省显存。
         enum llama_flash_attn_type   flash_attn_type;   // when to enable Flash Attention
 
         // ref: https://github.com/ggml-org/llama.cpp/pull/2054
         float    rope_freq_base;   // RoPE base frequency, 0 = from model
+        // RoPE 频率缩放因子，0 表示使用模型默认设置。
+        // 比如设为 0.5，就相当于把尺子的刻度变细了一倍，理论上能多量出一倍的长度。
         float    rope_freq_scale;  // RoPE frequency scaling factor, 0 = from model
+        // YaRN 扩展因子，负值表示使用模型默认设置。
+        // 控制模型在超出原始长度时，多少程度靠“猜”（外推），多少程度靠“连线”（插值）。
         float    yarn_ext_factor;  // YaRN extrapolation mix factor, negative = from model
+        // YaRN 注意力因子，缩放注意力权重的数值，用来补偿因为拉长上下文而导致的“注意力稀释”。
         float    yarn_attn_factor; // YaRN magnitude scaling factor
+        // YaRN 低频校正维度，YaRN 算法中的两个核心数学常数，分别针对高频和低频维度进行修正。
         float    yarn_beta_fast;   // YaRN low correction dim
         float    yarn_beta_slow;   // YaRN high correction dim
+        // YaRN 原始上下文大小，告诉 YaRN 这个模型原本是按多长训练的（比如 4096），这是所有缩放计算的基准点
         uint32_t yarn_orig_ctx;    // YaRN original context size
+        // 触发 KV 缓存碎片整理的阈值，如果缓存中的碎片数量超过这个值，就会触发整理，已过时
         float    defrag_thold;     // [DEPRECATED] defragment the KV cache if holes/size > thold, <= 0 disabled (default)
 
         ggml_backend_sched_eval_callback cb_eval;
+        // 评估回调函数的上下文数据，通常用来传递一些额外的信息给回调函数
         void * cb_eval_user_data;
 
         enum ggml_type type_k; // data type for K cache [EXPERIMENTAL]
@@ -394,16 +445,27 @@ extern "C" {
         // if it returns true, execution of llama_decode() will be aborted
         // currently works only with CPU execution
         ggml_abort_callback abort_callback;
+        // 中断回调函数的上下文数据，通常用来传递一些额外的信息给回调函数
         void *              abort_callback_data;
 
         // Keep the booleans together and at the end of the struct to avoid misalignment during copy-by-value.
         bool embeddings;  // if true, extract embeddings (together with logits)
+        // 显存卸载，决定是否把注意力机制中最核心的 K（键）、Q（查询）、V（值） 运算以及它们的缓存全部扔给 GPU 处理。
         bool offload_kqv; // offload the KQV ops (including the KV cache) to GPU
         bool no_perf;     // measure performance timings
+        // 卸载主机张量操作，把一些原本在内存里跑的简单数学运算（比如加减乘除）也搬到 GPU 上去算。
         bool op_offload;  // offload host tensor operations to device
+        // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
+        // NOTE: setting to false when n_seq_max > 1 can cause bad performance in some cases
+        //       ref: https://github.com/ggml-org/llama.cpp/pull/13845#issuecomment-2924800573
+        // SWA 全缓存模式
         bool swa_full;    // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
                           // NOTE: setting to false when n_seq_max > 1 can cause bad performance in some cases
                           //       ref: https://github.com/ggml-org/llama.cpp/pull/13845#issuecomment-2924800573
+        // use a unified buffer across the input sequences when computing the attention
+        // try to disable when n_seq_max > 1 for improved performance when the sequences do not share a large prefix
+        // ref: https://github.com/ggml-org/llama.cpp/pull/14363
+        // 统一 KV 缓存，在处理多个并行的序列（对话）时，是否强行让它们共用同一个大的缓存内存块。
         bool kv_unified;  // use a unified buffer across the input sequences when computing the attention
                           // try to disable when n_seq_max > 1 for improved performance when the sequences do not share a large prefix
                           // ref: https://github.com/ggml-org/llama.cpp/pull/14363
@@ -412,6 +474,9 @@ extern "C" {
         // backend sampler chain configuration (make sure the caller keeps the sampler chains alive)
         // note: the samplers must be sampler chains (i.e. use llama_sampler_chain_init)
         struct llama_sampler_seq_config * samplers;
+        // n_samplers (采样器数量) —— “流水线的规模”
+        // 作用：指定你在这个流水线上挂了几个采样器。比如，你可能想先用 Top-K 过滤掉大部分词，再用 Temperature 随机选一个，
+        // 那么你就可以设置 2 个采样器。这让采样过程变得非常灵活和高效。
         size_t                            n_samplers;
 
         // a source/target/parent context
@@ -1461,10 +1526,10 @@ extern "C" {
     /// NOTE: Avoid using on the full vocabulary as searching for repeated tokens can become slow. For example, apply top-k or top-p sampling first.
     LLAMA_API struct llama_sampler * llama_sampler_init_penalties(
                              int32_t   n_vocab,
-                             int32_t   penalty_last_n,   // last n tokens to penalize (0 = disable penalty)
-                               float   penalty_repeat,   // must be > 0.0, 1.0 = disabled
-                               float   penalty_freq,     // must be finite, 0.0 = disabled
-                               float   penalty_present); // must be finite, 0.0 = disabled
+                             int32_t   penalty_last_n,  // last n tokens to penalize (0 = disable penalty, -1 = context size)
+                               float   penalty_repeat,  // 1.0 = disabled
+                               float   penalty_freq,  // 0.0 = disabled
+                               float   penalty_present);  // 0.0 = disabled
 
     ///  @details DRY sampler, designed by p-e-w, as described in: https://github.com/oobabooga/text-generation-webui/pull/5677, porting Koboldcpp implementation authored by pi6am: https://github.com/LostRuins/koboldcpp/pull/982
     LLAMA_API struct llama_sampler * llama_sampler_init_dry(

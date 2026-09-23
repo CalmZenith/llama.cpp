@@ -13,20 +13,20 @@
 
 
 enum server_task_type {
-    SERVER_TASK_TYPE_COMPLETION,
-    SERVER_TASK_TYPE_EMBEDDING,
-    SERVER_TASK_TYPE_RERANK,
-    SERVER_TASK_TYPE_INFILL,
-    SERVER_TASK_TYPE_CANCEL,
+    SERVER_TASK_TYPE_COMPLETION,  // 常规生成
+    SERVER_TASK_TYPE_EMBEDDING,  // 向量嵌入
+    SERVER_TASK_TYPE_RERANK,  // 重排算分
+    SERVER_TASK_TYPE_INFILL,  // 中间插空/填空
+    SERVER_TASK_TYPE_CANCEL,  // 取消任务
     SERVER_TASK_TYPE_CONTROL,
-    SERVER_TASK_TYPE_NEXT_RESPONSE,
-    SERVER_TASK_TYPE_METRICS,
+    SERVER_TASK_TYPE_NEXT_RESPONSE,  // 催促新结果
+    SERVER_TASK_TYPE_METRICS,  // 指标
     SERVER_TASK_TYPE_SLOT_GET,
-    SERVER_TASK_TYPE_SLOT_SAVE,
-    SERVER_TASK_TYPE_SLOT_RESTORE,
-    SERVER_TASK_TYPE_SLOT_ERASE,
-    SERVER_TASK_TYPE_GET_LORA,
-    SERVER_TASK_TYPE_SET_LORA,
+    SERVER_TASK_TYPE_SLOT_SAVE,  // 保存槽位
+    SERVER_TASK_TYPE_SLOT_RESTORE,  // 恢复槽位
+    SERVER_TASK_TYPE_SLOT_ERASE,  // 删除槽位
+    SERVER_TASK_TYPE_GET_LORA,  // 获取LoRA
+    SERVER_TASK_TYPE_SET_LORA,  // 设置LoRA
 };
 
 // TODO: change this to more generic "response_format" to replace the "format_response_*" in server-common
@@ -104,11 +104,13 @@ struct task_params {
 // struct for tracking the state of a task (e.g., for streaming)
 struct task_result_state {
     // tracking diffs for partial tool calls
+    // tracking diffs for partial tool calls
+    // 记录每次生成中“变化量”的列表。
     std::vector<common_chat_msg_diff> diffs;
     common_chat_parser_params chat_parser_params;
-    common_chat_msg chat_msg;
-    std::string generated_text; // append new chunks of generated text here
-    std::vector<std::string> generated_tool_call_ids;
+    common_chat_msg chat_msg;  // 记录了从生成开始到上一秒钟，模型说过的所有话（包括思考内容和工具调用的完整参数）。
+    std::string generated_text;  // 模型生成的内容的原始状态
+    std::vector<std::string> generated_tool_call_ids;  // 记录了所有工具调用的 ID。
     std::unordered_set<size_t> sent_tool_call_names;
 
     // for OpenAI Responses and Anthropic streaming API:
@@ -118,9 +120,9 @@ struct task_result_state {
 
     // for OpenAI Responses streaming API
     bool oai_resp_created = false;
-    const std::string oai_resp_id;
-    const std::string oai_resp_reasoning_id;
-    const std::string oai_resp_message_id;
+    const std::string oai_resp_id;  // 响应总 id
+    const std::string oai_resp_reasoning_id;  // 思维链 id
+    const std::string oai_resp_message_id;  // 消息 id
     std::string oai_resp_fc_id; // function call ID for current args delta
 
     task_result_state(const common_chat_parser_params & chat_parser_params);

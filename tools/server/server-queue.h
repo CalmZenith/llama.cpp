@@ -201,12 +201,12 @@ public:
 // it provides a generator-like API for server responses
 // support pooling connection state and aggregating multiple results
 struct server_response_reader {
-    std::unordered_set<int> id_tasks;
-    server_queue & queue_tasks;
-    server_response & queue_results;
-    size_t received_count = 0;
-    bool cancelled = false;
-    int polling_interval_seconds;
+    std::unordered_set<int> id_tasks;  // 追踪属于当前 HTTP 请求的所有任务 ID
+    server_queue & queue_tasks;  // 全局任务队列
+    server_response & queue_results;  // 全局结果队列
+    size_t received_count = 0;  // 记录目前已经从模型手里领回了多少个结果（Token 或 结果块）
+    bool cancelled = false;  // 标记该请求是否已被客户端主动取消（例如网页关闭或跳转）
+    int polling_interval_seconds;  // 轮询间隔（秒），决定了每隔多久去问一次“有没有新结果”
 
     // tracking generation state and partial tool calls
     // only used by streaming completions
@@ -225,7 +225,9 @@ struct server_response_reader {
 
     // if front = true, the task will be posted to the front of the queue (high priority)
     void post_task(server_task && task, bool front = false);
+    // 批量派发多个任务。比如处理多 Prompt 或重排序（Rerank）任务。
     void post_tasks(std::vector<server_task> && tasks, bool front = false);
+    // 检查是否还有任务尚未完成。它通过比对“已发送任务数”和“已接收结果数”来判断。
     bool has_next() const;
 
     // return nullptr if should_stop() is true before receiving a result

@@ -610,12 +610,17 @@ struct llama_meta_device_get_split_state_userdata {
 struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const struct ggml_tensor * tensor, void * userdata);
 
 struct llama_model {
+    // 模型的型号，代表了这个模型具体的参数规模分类
+    // 比如加载的是 Llama-3-8B，这个值会被设为 LLM_TYPE_8B；如果是 Llama-2-70B，就是 LLM_TYPE_70B
     llm_type type = LLM_TYPE_UNKNOWN;
+    // 模型架构类型，比如LLM_ARCH_LLAMA（Meta 的 Llama 系列）、LLM_ARCH_QWEN2（阿里巴巴的通义千问
+    // llama.cpp 通过这个参数来决定加载哪一套计算逻辑（算子）。
     llm_arch arch = LLM_ARCH_UNKNOWN;
 
     std::string name = "n/a";
 
     llama_hparams hparams = {};
+    // 词表
     llama_vocab   vocab;
 
     // for classifier models
@@ -772,6 +777,8 @@ struct llama_model {
     virtual std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const = 0;
 
 protected:
+    // 它决定了 “怎么把模型运行起来”，如 ngl 决定要把多少层放到显卡算，多少留给 CPU
+    // 可以随意修改
     llama_model_params params;
 
     struct impl;

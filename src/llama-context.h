@@ -59,18 +59,19 @@ struct llama_context {
     void synchronize();
 
     const llama_model   & get_model()   const;
+    // 返回指向“参数（Params）”的引用
     const llama_cparams & get_cparams() const;
 
     ggml_backend_sched_t get_sched() const;
 
-    uint32_t n_ctx()     const;
-    uint32_t n_ctx_seq() const;
-    uint32_t n_batch()   const;
-    uint32_t n_ubatch()  const;
-    uint32_t n_seq_max() const;
+    uint32_t n_ctx()     const;  // 返回当前上下文的总容量（能记住多少个 Token）。
+    uint32_t n_ctx_seq() const;  // 返回当前上下文的序列长度（实际用了多少 Token）。
+    uint32_t n_batch()   const;  // 返回当前单次推理能处理的最大逻辑批次大小（一次最多能处理多少个 Token）。
+    uint32_t n_ubatch()  const;  // 返回当前硬件底层执行的物理 批次大小（一次能处理多少个 Token）。
+    uint32_t n_seq_max() const;  // 返回当前会话支持的最大并行序列数。
 
-    uint32_t n_threads()       const;
-    uint32_t n_threads_batch() const;
+    uint32_t n_threads()       const;  // 返回生成单个 Token 时使用的 CPU 线程数。
+    uint32_t n_threads_batch() const;  // 返回批量处理 Prompt 时使用的 CPU 线程数。
 
     llama_memory_t get_memory() const;
 
@@ -79,29 +80,29 @@ struct llama_context {
 
     enum llama_pooling_type pooling_type() const;
 
-    float * get_logits();
-    float * get_logits_ith(int32_t i);
+    float * get_logits();  // 获取每个词可能出现的“原始分数”
+    float * get_logits_ith(int32_t i);  // 获取第 i 个位置的 Logits（原始概率分布）。
 
-    float * get_embeddings();
-    float * get_embeddings_ith(int32_t i);
-    float * get_embeddings_seq(llama_seq_id seq_id);
+    float * get_embeddings();  // 获取文本被模型高度浓缩后的坐标向量。
+    float * get_embeddings_ith(int32_t i);  // 获取第 i 个位置的 Embedding 向量。
+    float * get_embeddings_seq(llama_seq_id seq_id);  // 获取指定序列 ID 的 Embedding 向量。
 
     float * get_embeddings_nextn();
     float * get_embeddings_nextn_ith(int32_t i);
 
     float * get_embeddings_layer_inp(uint32_t lid);
 
-    llama_token * get_sampled_tokens() const;
-    llama_token   get_sampled_token_ith(int32_t idx);
+    llama_token * get_sampled_tokens() const;  // 获取采样后的 Token 序列。
+    llama_token   get_sampled_token_ith(int32_t idx);  // 获取采样后的第 i 个 Token。
 
-    float * get_sampled_logits_ith(int32_t idx);
-    size_t  get_sampled_logits_count(int32_t idx);
+    float * get_sampled_logits_ith(int32_t idx);  // 获取采样后第 i 个位置的 Logits。
+    size_t  get_sampled_logits_count(int32_t idx);  // 获取采样后第 i 个位置的 Logits 数量。
 
-    float * get_sampled_probs_ith(int32_t idx);
-    size_t  get_sampled_probs_count(int32_t idx);
+    float * get_sampled_probs_ith(int32_t idx);  // 获取采样后第 i 个位置的概率分布。
+    size_t  get_sampled_probs_count(int32_t idx);  // 获取采样后第 i 个位置的概率分布数量。
 
-    const llama_token * get_sampled_candidates_ith(int32_t idx);
-    size_t get_sampled_candidates_count(int32_t idx);
+    const llama_token * get_sampled_candidates_ith(int32_t idx);  // 获取采样后第 i 个位置的候选 Token。
+    size_t get_sampled_candidates_count(int32_t idx);  // 获取采样后第 i 个位置的候选 Token 数量。
 
     void attach_threadpool(
             ggml_threadpool_t threadpool,
@@ -117,7 +118,9 @@ struct llama_context {
     void set_embeddings_nextn(bool value, bool masked);
     void set_embeddings_layer_inp(uint32_t lid, bool enable);
     void set_nextn_layer_offset(int32_t offset);
+    // 开启/关闭因果注意力机制
     void set_causal_attn(bool value);
+    // 开启/关闭预热
     void set_warmup(bool value);
 
     void set_adapters_lora(llama_adapter_lora ** adapters, size_t n_adapters, float * scales);
@@ -142,6 +145,9 @@ struct llama_context {
                        ggml_status & ret);
 
     int encode(const llama_batch & batch_inp);
+    // 解码：把 Token ID 转成文字，它接收一个 llama_batch（你要给模型看的所有新词），然后启动整个推理流程。
+    // 做了什么：它会自动把大的 Batch 拆成刚才说的 ubatch。它会协调显卡把这些词过一遍神经网络。
+    // 最关键的：它会把这些词的信息存入 KV Cache（短期记忆）。这样模型在算下一个词的时候，就能记得刚才说了什么。
     int decode(const llama_batch & batch_inp);
 
     //
@@ -150,11 +156,14 @@ struct llama_context {
 
     size_t state_get_size();
     size_t state_get_data(      uint8_t * dst, size_t size);
+    // 设置当前上下文的状态数据
     size_t state_set_data(const uint8_t * src, size_t size);
 
     size_t state_seq_get_size(llama_seq_id seq_id, llama_state_seq_flags flags);
 
+    // 获取指定序列的状态数据
     size_t state_seq_get_data(llama_seq_id seq_id,       uint8_t * dst, size_t size, llama_state_seq_flags flags);
+    // 设置指定序列的状态数据
     size_t state_seq_set_data(llama_seq_id seq_id, const uint8_t * src, size_t size, llama_state_seq_flags flags);
 
     bool state_load_file(
@@ -186,6 +195,7 @@ struct llama_context {
     //
 
     llama_perf_context_data perf_get_data() const;
+    // 重置性能数据
     void perf_reset();
 
     llama_memory_breakdown memory_breakdown() const;
@@ -224,6 +234,12 @@ private:
 
     // Make sure enough space is available for outputs.
     // Returns max number of outputs for which space was reserved.
+    //
+    // output
+    //
+    // Make sure enough space is available for outputs.
+    // Returns max number of outputs for which space was reserved.
+    // 确保有足够的空间来存放输出。
     uint32_t output_reserve(int32_t n_outputs);
 
     void output_reorder();
@@ -240,6 +256,7 @@ private:
     //
 
 public:
+    // 计算图的最大节点数。
     uint32_t graph_max_nodes(uint32_t n_tokens) const;
 
     // can reuse the llm_graph_result instance of the context (for example to update a memory module)
@@ -309,6 +326,8 @@ private:
 
     struct sampling_info {
         // !samplers.empty() to check if any samplers are active
+        // 采样器。
+        // 这是一个映射表（Map），记录了每一个对话序列（seq_id）对应使用哪套采样规则（采样器）。
         std::map<llama_seq_id, llama_sampler *> samplers;
 
         buffer_view<float>       logits     = {nullptr, 0};
@@ -350,15 +369,20 @@ private:
     bool sched_need_reserve = true;
 
     ggml_backend_t backend_cpu = nullptr;
+    // 这是一个容器，里面装着所有可用的“加速器”。
+    // 如果你电脑有 NVIDIA 显卡，这里面就有一个 CUDA 指针；如果你是苹果 M1/M2/M3，这里面就有一个 Metal 指针。
+    // 程序会根据这个列表，智能地把计算任务分发给它们。
     std::vector<ggml_backend_ptr> backends;
 
     // training
     ggml_opt_context_t opt_ctx = nullptr;
 
     ggml_threadpool_t threadpool       = nullptr;
+    // 代表了用于“批量阅读”（Batch processing）的 CPU 线程池
     ggml_threadpool_t threadpool_batch = nullptr;
 
     ggml_abort_callback abort_callback      = nullptr;
+    // 中断回调函数的数据指针。
     void *              abort_callback_data = nullptr;
 
     std::vector<std::pair<ggml_backend_t, ggml_backend_set_n_threads_t>> set_n_threads_fns;
@@ -386,15 +410,16 @@ private:
     bool graph_reuse_disable = false;
 
     // perf
-    mutable int64_t t_start_us  = 0;
-    mutable int64_t t_load_us   = 0;
-    mutable int64_t t_p_eval_us = 0;
-    mutable int64_t t_eval_us   = 0;
+    mutable int64_t t_start_us  = 0;  // 整个会话启动的初始时刻。
+    mutable int64_t t_load_us   = 0;  // 加载模型、初始化后端花了多久。
+    mutable int64_t t_p_eval_us = 0;  // 预处理 Prompt（Tokenization + Graph 构建）花了多久。
+    mutable int64_t t_eval_us   = 0;  // 实际生成 Token 的总耗时。
 
-    mutable int64_t t_compute_start_us = 0;
-    mutable int64_t n_queued_tokens    = 0;
+    mutable int64_t t_compute_start_us = 0;  // 当前这一次具体计算开始的瞬间。
+    mutable int64_t n_queued_tokens    = 0;  // 当前这一次具体计算中，一共有多少个 Token 在排队等待处理。
 
     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
+    // 在生成阶段一共“写出”多少个词。
     mutable int32_t n_eval   = 0; // number of eval calls
 
     mutable int32_t n_reused = 0; // number of times the previous graph was reused

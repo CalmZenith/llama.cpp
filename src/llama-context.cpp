@@ -935,6 +935,8 @@ int64_t llama_context::output_resolve_row(int32_t i) const {
     }
 
     if (j >= n_outputs) {
+        // This should not happen
+        // This should not happen
         throw std::runtime_error(format("corrupt output buffer (j=%" PRId64 ", n_outputs=%d)", j, n_outputs));
     }
 
@@ -1412,6 +1414,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
             ggml_backend_sched_synchronize(sched.get());
         }
 
+        //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
         n_reused++;
     } else {
         gf_res_prev_active = nullptr;
@@ -1686,6 +1689,7 @@ static void copy_tensor_async_rows(
 
 static bool needs_raw_logits(const llama_ubatch & ubatch, const std::map<llama_seq_id, llama_sampler *> & samplers) {
     for (uint32_t i = 0; i < ubatch.n_tokens; i++) {
+        // skip tokens that are not output.
         if (!ubatch.output[i]) {
             continue;
         }
@@ -1888,6 +1892,9 @@ int llama_context::decode(const llama_batch & batch_inp) {
 
         if (!res) {
             // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
+            // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
+            // Cross point P3<->P4:
+            // P4 reports failure on a ubatch, P3-owned memory state must roll back by seq/pos range.
             llama_pos pos_min[LLAMA_MAX_SEQ];
             for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
                 pos_min[s] = std::numeric_limits<llama_pos>::max();
@@ -3790,6 +3797,8 @@ llama_context * llama_init_from_model(
     }
 
     if (params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_DISABLED && ggml_is_quantized(params.type_k)) {
+        // 量化技术（比如 Q4_0）并不是一个字节存一个数，而是 “打包处理”。比如 Q4_0 每 32 个数字会被打包成一个“块”，共用一个缩放系数。
+        // 这里的 blck_size 就是这个“包”的大小（通常是 32）。
         const uint32_t blck_size = ggml_blck_size(params.type_k);
         for (uint32_t il = 0; il < model->hparams.n_layer(); ++il) {
             if (model->hparams.n_embd_head_k(il) % blck_size != 0) {

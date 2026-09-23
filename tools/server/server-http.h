@@ -49,7 +49,7 @@ struct uploaded_file {
 struct server_http_req {
     std::map<std::string, std::string> params; // path_params + query_params
     std::map<std::string, std::string> headers; // used by MCP proxy
-    std::string path;
+    std::string path;  // reserved for future use
     std::string query_string; // query parameters string (e.g. "action=save")
     std::string body;
     std::map<std::string, uploaded_file> files; // used for file uploads (form data)

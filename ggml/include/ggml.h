@@ -387,7 +387,7 @@ extern "C" {
 
     // NOTE: always add types at the end of the enum to keep backward compatibility
     enum ggml_type {
-        GGML_TYPE_F32     = 0,
+        GGML_TYPE_F32     = 0,  // 32位浮点数
         GGML_TYPE_F16     = 1,
         GGML_TYPE_Q4_0    = 2,
         GGML_TYPE_Q4_1    = 3,
@@ -395,15 +395,15 @@ extern "C" {
         // GGML_TYPE_Q4_3 = 5, support has been removed
         GGML_TYPE_Q5_0    = 6,
         GGML_TYPE_Q5_1    = 7,
-        GGML_TYPE_Q8_0    = 8,
+        GGML_TYPE_Q8_0    = 8,  // 8位量化
         GGML_TYPE_Q8_1    = 9,
         GGML_TYPE_Q2_K    = 10,
         GGML_TYPE_Q3_K    = 11,
-        GGML_TYPE_Q4_K    = 12,
+        GGML_TYPE_Q4_K    = 12,  // k系列量化，按块进行不同权重的精细压缩
         GGML_TYPE_Q5_K    = 13,
         GGML_TYPE_Q6_K    = 14,
         GGML_TYPE_Q8_K    = 15,
-        GGML_TYPE_IQ2_XXS = 16,
+        GGML_TYPE_IQ2_XXS = 16,  // "Importance Quantization"（重要性量化）。针对极低位宽（比如 1.5 到 3 位）设计的算法。
         GGML_TYPE_IQ2_XS  = 17,
         GGML_TYPE_IQ3_XXS = 18,
         GGML_TYPE_IQ1_S   = 19,
@@ -411,13 +411,13 @@ extern "C" {
         GGML_TYPE_IQ3_S   = 21,
         GGML_TYPE_IQ2_S   = 22,
         GGML_TYPE_IQ4_XS  = 23,
-        GGML_TYPE_I8      = 24,
+        GGML_TYPE_I8      = 24,  // 整数。通常用于存储 Token ID（词的编号）或者是矩阵的索引。
         GGML_TYPE_I16     = 25,
         GGML_TYPE_I32     = 26,
         GGML_TYPE_I64     = 27,
         GGML_TYPE_F64     = 28,
         GGML_TYPE_IQ1_M   = 29,
-        GGML_TYPE_BF16    = 30,
+        GGML_TYPE_BF16    = 30,  // 脑浮点，虽然也是16位，但动态范围更大，训练模型常用。
         // GGML_TYPE_Q4_0_4_4 = 31, support has been removed from gguf files
         // GGML_TYPE_Q4_0_4_8 = 32,
         // GGML_TYPE_Q4_0_8_8 = 33,
@@ -442,7 +442,7 @@ extern "C" {
     // the precision parameters are stored as ggml_tensor.op_params to the respective ops
     enum ggml_prec {
         GGML_PREC_UNDEFINED = 0,
-        GGML_PREC_DEFAULT   = 0,  // note: deprecated, use GGML_PREC_UNDEFINED
+        GGML_PREC_DEFAULT   = 0,  // stored as ggml_tensor.op_params, 0 by default
         GGML_PREC_F32       = 10,
         GGML_PREC_BF16      = 15,
         GGML_PREC_F16       = 20,
@@ -688,12 +688,17 @@ extern "C" {
         struct ggml_backend_buffer * buffer;
 
         int64_t ne[GGML_MAX_DIMS]; // number of elements
+        // 步长。表示在内存中移动到下一个维度需要跨越多少字节。这在处理内存对齐和非连续内存块（比如“视图 view”）时至关重要。
         size_t  nb[GGML_MAX_DIMS]; // stride in bytes:
                                    // nb[0] = ggml_type_size(type)
                                    // nb[1] = nb[0]   * (ne[0] / ggml_blck_size(type)) + padding
                                    // nb[i] = nb[i-1] * ne[i-1]
 
         // compute data
+        // nb[0] = ggml_type_size(type)
+        // nb[1] = nb[0]   * (ne[0] / ggml_blck_size(type)) + padding
+        // nb[i] = nb[i-1] * ne[i-1]
+        // 代表这个张量是怎么算出来的。比如 GGML_OP_MUL_MAT 表示它是两个矩阵相乘的结果。
         enum ggml_op op;
 
         // op params - allocated as int32_t for alignment

@@ -75,8 +75,13 @@ struct llama_model_loader;
 
 struct llama_vocab {
     struct token_data {
+        // 这个 Token 对应的原始字符串或字节流。
+        // 可能是 "hello"，也可能是用于 BPE 编码的特殊字符（比如 Llama-3 里的字节表示）。这是最直观的“词”本身。
         std::string      text;
+        // 该 Token 在训练词表（如 SentencePiece 或 BPE）时的 “重要性得分” 或 “对数频率”。
+        // 把一个长句子拆解成多个 Token 时，有些拆法会有歧义。分词器会根据这个 score 来计算哪种拆分方案的“总分”最高，从而选出分词结果。
         float            score;
+        // 描述这个 Token 的类型属性，例如它是否是特殊 Token（如 BOS、EOS）、是否是控制字符等。
         llama_token_attr attr;
     };
 
@@ -106,7 +111,7 @@ struct llama_vocab {
     bool is_unknown     (llama_token id) const;
     bool is_control     (llama_token id) const;
     bool is_byte        (llama_token id) const;
-    bool is_user_defined(llama_token id) const;
+    bool is_user_defined(llama_token id) const;  // 用户自定义
     bool is_unused      (llama_token id) const;
     bool is_eog         (llama_token id) const;
 

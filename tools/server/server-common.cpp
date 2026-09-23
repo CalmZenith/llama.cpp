@@ -662,6 +662,12 @@ void server_tokens::keep_first(size_t n) {
         // n  1   2   3   4   5   6      7      8      9      10
         // allowed to resize      ^                    ^
         // disallowed to resize          ^      ^             ^
+        // we throw an error if we try to remove a token in the middle of an image
+        // for ex. with input of 5 text tokens and 2 images:
+        //    [0] [1] [2] [3] [4] [img0] [img0] [img0] [img1] [img1]
+        // n  1   2   3   4   5   6      7      8      9      10
+        // allowed to resize      ^                    ^
+        // disallowed to resize          ^      ^             ^
         if (n > 0) {
             // make sure we never remove tokens in the middle of an image
             // note that the case where we keep a full image at the end is allowed:
@@ -777,7 +783,7 @@ bool server_tokens::validate(const struct llama_context * ctx) const {
                     }
                 }
                 ++n_media;
-                i += n_tokens - 1;
+                i += n_tokens - 1;  // will be +1 by the for loop
             } catch (const std::exception & e) {
                 return false;
             }
@@ -982,16 +988,18 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
     constexpr char JSON_STRING_PROMPT_KEY[] = "prompt_string";
     constexpr char JSON_MTMD_DATA_KEY[] = "multimodal_data";
     const bool has_mtmd = mctx != nullptr;
+    // 情况 1: 纯字符串（如 "Hello"）或 字符串与 Token ID 混合列表（如 ["Hi", 123]）
     if (json_prompt.is_string() || json_is_array_of_mixed_numbers_strings(json_prompt)) {
         // string or mixed
         llama_tokens tmp = tokenize_mixed(vocab, json_prompt, add_special, parse_special);
         return server_tokens(tmp, false);
-    } else if (json_is_array_of_numbers(json_prompt)) {
+    } else if (json_is_array_of_numbers(json_prompt)) {  // 情况 2: 纯 Token ID 数组（如 [12, 34, 56]），用户已经手动分好词了
         // array of tokens
         llama_tokens tmp = json_prompt.get<llama_tokens>();
         return server_tokens(tmp, false);
     } else if (json_prompt.contains(JSON_STRING_PROMPT_KEY)) {
         // JSON object with prompt key.
+        // 情况 3.1: 包含多模态数据（图片等）
         if (json_prompt.contains(JSON_MTMD_DATA_KEY)) {
             if (!has_mtmd)
                 throw std::runtime_error("Multimodal data provided, but model does not support multimodal requests.");
@@ -1013,7 +1021,8 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
 }
 
 std::vector<server_tokens> tokenize_input_prompts(const llama_vocab * vocab, mtmd_context * mctx, const json & json_prompt, bool add_special, bool parse_special, const mtmd_helper_init_opt & init_opt) {
-    std::vector<server_tokens> result;
+    std::vector<server_tokens> result;  // 存储最终的 token 结果
+    // 如果 prompt 是数组且不包含纯数字（即可能是混合类型或多模态）
     if (json_prompt.is_array() && !json_is_array_and_contains_numbers(json_prompt)) {
         result.reserve(json_prompt.size());
         for (const auto & p : json_prompt) {
@@ -1122,6 +1131,7 @@ static void handle_media(
 
     } else if (string_starts_with(url, "data:")) {
         // try to decode base64 image, video, or audio
+        // try to decode base64 image
         std::vector<std::string> parts = string_split<std::string>(url, /*separator*/ ',');
         if (parts.size() != 2) {
             throw std::invalid_argument("Invalid uri-encoded base64 value");
@@ -1721,6 +1731,19 @@ llama_tokens format_prompt_infill(
     ) {
     // TODO: optimize this block by reducing memory allocations and movement
 
+    // use FIM repo-level pattern:
+    // ref: https://arxiv.org/pdf/2409.12186
+    //
+    // [FIM_REP]myproject
+    // [FIM_SEP]filename0
+    // extra chunk 0
+    // [FIM_SEP]filename1
+    // extra chunk 1
+    // ...
+    // [FIM_SEP]filename
+    // [FIM_PRE]prefix[FIM_SUF]suffix[FIM_MID]prompt
+    //
+    // TODO: optimize this block by reducing memory allocations and movement
     // use FIM repo-level pattern:
     // ref: https://arxiv.org/pdf/2409.12186
     //

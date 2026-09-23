@@ -22,10 +22,10 @@ enum llama_expert_gating_func_type {
 };
 
 enum llama_swa_type {
-    LLAMA_SWA_TYPE_NONE      = 0,
-    LLAMA_SWA_TYPE_STANDARD  = 1,
-    LLAMA_SWA_TYPE_CHUNKED   = 2,
-    LLAMA_SWA_TYPE_SYMMETRIC = 3,
+    LLAMA_SWA_TYPE_NONE      = 0,  // 不开启
+    LLAMA_SWA_TYPE_STANDARD  = 1,  // 标准
+    LLAMA_SWA_TYPE_CHUNKED   = 2,  // 分块
+    LLAMA_SWA_TYPE_SYMMETRIC = 3,  // 对称，前后全看
 };
 
 // how the non-causal mask should be constructed with llama_set_causal_attn(ctx, false)
@@ -53,15 +53,17 @@ struct llama_hparams {
     // note: use the `_impl` suffix to avoid name conflict between members and getters
     //       for example: n_embd_out() vs n_embd_out_impl
 
-    bool vocab_only;
-    bool no_alloc;
-    bool rope_finetuned;
-    bool use_par_res;
-    bool swin_norm;
+    // 与模型架构相关
+    bool vocab_only;  // 只加载词表
+    bool no_alloc;  // 不分配内存，加载时会解析出模型所有张量的结构、形状、类型，但不真正向系统申请内存块。
+    // 主要用于“估算”。比如程序想先看看这个模型如果全加载需要多少 GB 显存，如果发现显存不够，就提前报错，而不是等申请内存失败再崩溃。
+    bool rope_finetuned;  // RoPE 微调
+    bool use_par_res;  // 并行残差
+    bool swin_norm;  // Swin 归一化，决定归一化的顺序。
     bool norm_before_residual = false;
     bool norm_before_fc       = false;
 
-    uint32_t n_ctx_train; // context size the model was trained on
+    uint32_t n_ctx_train;  // context size the model was trained on 训练上下文
     uint32_t n_embd;
     uint32_t n_layer_all;
     uint32_t n_layer_nextn = 0;
@@ -69,10 +71,14 @@ struct llama_hparams {
     // granite-switch: index of the single-head "router" KV layer that encodes
     // per-token adapter selection. -1 when the model has no such layer.
     int32_t  router_layer = -1;
-    uint32_t n_expert = 0;
+    uint32_t n_expert = 0;  // MoE 的专家总数
+    // 主要用于 T5 等模型。它不是用 RoPE 来标位置，而是把词与词之间的距离放进不同的“桶”里来给分。这个值定义了有多少个距离区间。
     uint32_t n_rel_attn_bkts = 0;
 
     // TODO: this needs to be reworked
+    // 缓存与位置相关
+    // 一个优化参数。在一些新型模型中，并不是每一层都有 KV 缓存。如果这个值 >= 0，只有前 N 层会占用显存来存 KVCache，
+    // 后面的层可能共用或不存
     int32_t  n_layer_kv_from_start = -1; // if non-negative, the first n_layer_kv_from_start layers have KV cache
 
     // different head size for full_attention and SWA layers
@@ -105,12 +111,21 @@ struct llama_hparams {
     std::array<uint32_t, LLAMA_MAX_LAYERS> n_expert_used_arr;
 
     uint32_t n_layer_dense_lead = 0;
+    // deepseek 专用，MLA 将 Q, K, V 压缩进一个低秩的潜在空间。
+    // 这两个值分别代表了 Q 和 KV 压缩后的秩（维度）。通过这种低秩分解技术，可以用小代价还原出全量的注意力。
     uint32_t n_lora_q           = 0;
     uint32_t n_lora_kv          = 0;
-    uint32_t n_ff_shexp         = 0;
-    uint32_t n_ff_chexp         = 0;
-    uint32_t n_expert_shared    = 0;
+    uint32_t n_ff_shexp         = 0;  // 共享专家隐层维度
+    uint32_t n_ff_chexp         = 0;  // 耦合专家隐层维度
+    // 共享专家（Shared Experts）：
+    //    普通的 MoE 每层都有自己独立的专家组。而 DeepSeek 引入了“共享专家”的概念。
+    //    这几个“共享专家”是所有 Token 都要经过的，相当于一个基础的“公共知识库”。
+    //    而其他专家是“班级专用”的。这能大幅减少参数量。
+    uint32_t n_expert_shared    = 0;  // 共享专家数
+    // 用于 GroupNorm 或 RMSNorm 的分组计算。有些模型不是对整个向量做归一化，而是切成几块（Group）分别归一化。
     uint32_t n_norm_groups      = 0;
+    // 分层专家组。为了提高效率，DeepSeek 把成百上千个专家分成了若干个“小组”。
+    // 路由时，先选组，再在组里选专家。这三个值分别定义了：总共有多少组、每次激活多少个组、每组里有多少个专家。
     uint32_t n_expert_groups    = 0;
     uint32_t n_group_used       = 0;
     uint32_t n_group_experts    = 0;
@@ -120,20 +135,22 @@ struct llama_hparams {
     uint32_t n_embd_head_k_mla_swa   = 0;
     uint32_t n_embd_head_v_mla_swa   = 0;
 
-    float    expert_group_scale   = 0.05f;
-    float    expert_weights_scale = 0.0f;
-    bool     expert_weights_norm  = false;
-    uint32_t expert_gating_func   = LLAMA_EXPERT_GATING_FUNC_TYPE_NONE;
-    uint32_t moe_every_n_layers   = 0;
+    float    expert_group_scale   = 0.05f;  // 专家组缩放
+    float    expert_weights_scale = 0.0f;  // 专家权重缩放
+    bool     expert_weights_norm  = false;  // 专家权重归一化开关
+    // 门控函数相关
+    // 一个枚举值，定义了用哪种数学公式来“找专家”，常见的有：Softmax、Sigmoid 或者 NONE。
+    uint32_t expert_gating_func   = LLAMA_EXPERT_GATING_FUNC_TYPE_NONE;  // 专家门控函数类型
+    uint32_t moe_every_n_layers   = 0;  // 每隔多少层使用 MoE，如果这个值是 2，意味着：一层 Dense，一层 MoE
     uint32_t moe_latent_size      = 0;
 
-    float f_norm_eps;
-    float f_norm_rms_eps;
-    float f_norm_group_eps;
+    float f_norm_eps;  // 用于标准的 LayerNorm
+    float f_norm_rms_eps;  // 用于 RMSNorm
+    float f_norm_group_eps;  // 用于 GroupNorm
 
-    float f_attn_logit_softcapping   = 50.0f;
-    float f_router_logit_softcapping = 30.0f;
-    float f_final_logit_softcapping  = 30.0f;
+    float f_attn_logit_softcapping   = 50.0f;  // 注意力的软截断，发生在计算 Q·K 之后，做 Softmax 之前。
+    float f_router_logit_softcapping = 30.0f;  // MoE 路由得分的软截断，发生在 MoE 选专家的时候。
+    float f_final_logit_softcapping  = 30.0f;  // 最终输出 Logits 的软截断，模型最后一层输出最终词表概率之前。
 
     // for RWKV
     uint32_t rescale_every_n_layers = 0;
@@ -146,20 +163,20 @@ struct llama_hparams {
     uint32_t n_lora_value_res_mix   = 0;
     uint32_t n_lora_gate            = 0;
 
-    float    rope_attn_factor = 1.0f;
-    float    rope_freq_base_train;
-    float    rope_freq_base_train_swa  = 10000.0f;
-    float    rope_freq_scale_train;
-    float    rope_freq_scale_train_swa = 1.0f;
+    float    rope_attn_factor = 1.0f;  // 训练时的注意力缩放因子
+    float    rope_freq_base_train;  // 训练时的基础频率
+    float    rope_freq_base_train_swa  = 10000.0f;  // SWA 时的基础频率，SWA 代表滑动窗口注意力
+    float    rope_freq_scale_train;  // 训练时的频率缩放因子，线性
+    float    rope_freq_scale_train_swa = 1.0f;  // SWA 时的频率缩放因子，线性
     float    rope_scaling_alpha        = 0.0f;  // NTK-aware alpha for XDRoPE
 
-    uint32_t n_ctx_orig_yarn;
-    float    rope_yarn_log_mul = 0.0f;
+    uint32_t n_ctx_orig_yarn;  // 原始训练长度
+    float    rope_yarn_log_mul = 0.0f;  // 对数乘法因子，用于对旋转频率进行对数空间下的微调，进一步平滑位置感
 
-    float    yarn_ext_factor  = -1.0f;
-    float    yarn_attn_factor =  1.0f;
-    float    yarn_beta_fast   = 32.0f;
-    float    yarn_beta_slow   =  1.0f;
+    float    yarn_ext_factor  = -1.0f;  // 外推因子，如果设为 -1，通常代表由程序根据缩放比例自动计算。
+    float    yarn_attn_factor =  1.0f;  // 注意力缩放因子
+    float    yarn_beta_fast   = 32.0f;  // 快速衰减因子，对于变化极快的特征维度，直接进行外推。
+    float    yarn_beta_slow   =  1.0f;  // 慢速衰减因子，对于变化很慢的维度，进行内插。
 
     std::array<int, 4> rope_sections;
 
@@ -214,25 +231,25 @@ struct llama_hparams {
 
     bool ssm_dt_b_c_rms = false;
 
-    float f_clamp_kqv      = 0.0f;
-    float f_max_alibi_bias = 0.0f;
-    float f_logit_scale    = 0.0f;
+    float f_clamp_kqv      = 0.0f;  // 硬截断，KQV 强行截断
+    float f_max_alibi_bias = 0.0f;  // ALiBi 偏置上限
+    float f_logit_scale    = 0.0f;  // Logits 缩放因子
 
     // Additional scale factors (Granite/Granite MoE)
-    float f_residual_scale  = 0.0f;
-    float f_embedding_scale = 0.0f;
-    float f_attention_scale = 0.0f;
+    float f_residual_scale  = 0.0f;  // 残差缩放因子
+    float f_embedding_scale = 0.0f;  // Embedding 缩放因子
+    float f_attention_scale = 0.0f;  // 注意力缩放因子
 
     // grok-2
-    float    f_attn_out_scale = 0.0f;
-    uint32_t attn_temp_length = 0;
+    float    f_attn_out_scale = 0.0f;  // 注意力输出缩放
+    uint32_t attn_temp_length = 0;  // 注意力温度长度
 
     float    f_attn_value_scale = 0.0f;
 
-    bool causal_attn   = true;
-    bool use_alibi     = false;
-    bool attn_soft_cap = false;
-    bool use_kq_norm   = false;
+    bool causal_attn   = true;  // 因果注意力开关
+    bool use_alibi     = false;  // ALiBi 偏置开关
+    bool attn_soft_cap = false;  // 注意力软截断开关
+    bool use_kq_norm   = false;  // KQ 归一化开关
 
     // for Classifiers
     uint32_t n_cls_out = 1;
@@ -254,11 +271,11 @@ struct llama_hparams {
     uint32_t dflash_selector_top_k   = 0;
 
     // llama4 smallthinker
-    uint32_t n_moe_layer_step        = 0;
-    uint32_t n_no_rope_layer_step    = 4;
-    uint32_t n_attn_temp_floor_scale = 0;
-    float    f_attn_temp_scale       = 0.0f;
-    float    f_attn_temp_offset      = 0.0f; // offset position index
+    uint32_t n_moe_layer_step        = 0;  // 每隔多少层使用 MoE
+    uint32_t n_no_rope_layer_step    = 4;  // 有多少层在计算时可以“关掉”位置编码
+    uint32_t n_attn_temp_floor_scale = 0;  // 缩放系数的下限
+    float    f_attn_temp_scale       = 0.0f;  // 缩放系数
+    float    f_attn_temp_offset      = 0.0f;  // 偏移量
 
     // gemma3n altup
     uint32_t n_altup      = 4; // altup_num_inputs
@@ -273,9 +290,9 @@ struct llama_hparams {
     uint32_t dense_3_feat_out = 0;  // out_features of the 3_Dense
 
     // xIELU
-    std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_n;
-    std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_p;
-    std::array<float, LLAMA_MAX_LAYERS> xielu_beta;
+    std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_n;  // 负向 Alpha，控制输入值为负数时的曲线斜率
+    std::array<float, LLAMA_MAX_LAYERS> xielu_alpha_p;  // 正向 Alpha，控制输入值为正数时的曲线斜率
+    std::array<float, LLAMA_MAX_LAYERS> xielu_beta;  // 贝塔系数，总体的缩放偏移量，用来调整激活函数的零点位置
     std::array<float, LLAMA_MAX_LAYERS> xielu_eps;
 
     // DSA (deepseek sparse attention)
@@ -346,12 +363,12 @@ struct llama_hparams {
 
     // needed by encoder-decoder models (e.g. T5, FLAN-T5)
     // ref: https://github.com/ggml-org/llama.cpp/pull/8141
-    llama_token dec_start_token_id = LLAMA_TOKEN_NULL;
-    uint32_t    dec_n_layer        = 0;
+    llama_token dec_start_token_id = LLAMA_TOKEN_NULL;  // 解码起始 token
+    uint32_t    dec_n_layer        = 0;  // 解码器层数
 
-    enum llama_pooling_type      pooling_type            = LLAMA_POOLING_TYPE_NONE;
-    enum llama_rope_type         rope_type               = LLAMA_ROPE_TYPE_NONE;
-    enum llama_rope_scaling_type rope_scaling_type_train = LLAMA_ROPE_SCALING_TYPE_NONE;
+    enum llama_pooling_type      pooling_type            = LLAMA_POOLING_TYPE_NONE;  // 池化类型
+    enum llama_rope_type         rope_type               = LLAMA_ROPE_TYPE_NONE;  // RoPE 类型
+    enum llama_rope_scaling_type rope_scaling_type_train = LLAMA_ROPE_SCALING_TYPE_NONE;  // RoPE 缩放类型
 
 
     // Resolved FFN gated activation flavor for archs that read

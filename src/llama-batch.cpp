@@ -573,6 +573,8 @@ llama_ubatch llama_batch_allocr::split_equal(uint32_t n_ubatch, bool sequential,
     while (true) {
         // we can only add new n_seq_tokens tokens if all the sequence sets have at least 1 more unused tokens and
         //   if we haven't reached n_ubatch
+        // we can only add new n_seq_tokens tokens if all the sequence sets have at least one more unused token and
+        //   if we haven't reached n_ubatch
         bool can_expand = true;
 
         for (uint32_t s = 0; s < n_seqs; ++s) {

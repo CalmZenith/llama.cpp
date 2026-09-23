@@ -470,6 +470,7 @@ void common_models_handler_apply(common_models_handler & handler, common_params 
     // handle plain "url" if needed
     auto handle_url = [&](common_params_model & model) {
         if (!model.url.empty()) {
+            // make sure model path is present (for caching purposes)
             if (model.path.empty()) {
                 model.path = get_default_local_path(model.url);
             }
@@ -875,6 +876,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
     };
 
     // parse all CLI args now, so that -hf is available below for remote preset resolution
+    // re-parse CLI args to override preset values
     parse_cli_args();
 
     postprocess_cpu_params(params.cpuparams,       nullptr);
@@ -1310,7 +1312,7 @@ bool common_params_parse(int argc, char ** argv, common_params & params, llama_e
         return false;
     } catch (std::exception & ex) {
         fprintf(stderr, "%s\n", ex.what());
-        exit(1); // for other exceptions, we exit with status code 1
+        exit(1);  // error message already printed
     }
 
     return true;
@@ -2132,6 +2134,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             float potential_base = std::stof(value);
             if (potential_base >= 1.0f)
+            // handle pre-fill default model path and url based on hf_repo and hf_file
             {
                 params.sampling.dry_base = potential_base;
             }
